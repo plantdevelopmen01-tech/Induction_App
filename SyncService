@@ -1,96 +1,45 @@
+/**
+ * Menjalankan sinkronisasi berkala dengan pemetaan header Manpower yang sama
+ * seperti sinkronisasi manual. Kolom Section, Superior, dan Jabatan tidak digunakan.
+ */
 function runBackgroundSync() {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    let dbSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
-    
-    if (!dbSheet) {
-      dbSheet = ss.insertSheet(DB_MP_SHEET_NAME);
-      dbSheet.appendRow(["NRP", "Nama"]);
-    }
+  return executeManualSync();
+}
 
-    const rows = sheet.getDataRange().getDisplayValues();
-    if (!rows || rows.length <= 1) return { success: true };
-
-    const headers = rows[0].map(h => String(h).toLowerCase().trim());
-    const findCol = (keywords) => headers.findIndex(h => keywords.some(kw => h.includes(kw)));
-    
-    const actualNrpIdx = findCol(['nrp', 'nik', 'id', 'user id']) !== -1 ? findCol(['nrp', 'nik', 'id', 'user id']) : 0;
-    const actualNamaIdx = findCol(['nama', 'name', 'karyawan', 'employee']) !== -1 ? findCol(['nama', 'name', 'karyawan', 'employee']) : 1;
-    const secIdx = headers.findIndex(h => h.includes('section') && !h.includes('sub'));
-    const subSecIdx = findCol(['sub section', 'subsection', 'sub']);
-
-    const dbRows = dbSheet.getDataRange().getDisplayValues();
-    let dbHeaders = dbRows.length > 0 ? dbRows[0].map(h => String(h).trim()) : ["NRP", "Nama"];
-    let dbNrpIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'nrp' || h.toLowerCase() === 'nik' || h.toLowerCase() === 'id');
-    let dbNamaIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'nama' || h.toLowerCase() === 'name');
-    
-    if (dbNrpIdx === -1) { dbNrpIdx = 0; }
-    if (dbNamaIdx === -1) { dbNamaIdx = 1; }
-
-    // Pastikan kolom Section dan Superior otomatis ada di header db_MP
-    ['Section', 'Superior'].forEach(targetCol => {
-      let idx = dbHeaders.findIndex(h => h.toLowerCase() === targetCol.toLowerCase());
-      if (idx === -1) {
-        dbSheet.getRange(1, dbHeaders.length + 1).setValue(targetCol);
-        dbHeaders.push(targetCol);
-      }
-    });
-
-    // Ambil ulang header dan data db_MP terbaru setelah penambahan kolom
-    dbRows = dbSheet.getDataRange().getDisplayValues();
-    dbHeaders = dbRows[0].map(h => String(h).trim());
-    let dbSecIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'section');
-    let dbSupIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'superior');
-
-    let dbMap = new Map();
-    for (let j = 1; j < dbRows.length; j++) {
-      let rNrp = String(dbRows[j][dbNrpIdx] || '').trim();
-      if (rNrp) dbMap.set(rNrp, j + 1);
-    }
-
-    for (let i = 1; i < rows.length; i++) {
-      let uNrp = String(rows[i][actualNrpIdx] || '').trim();
-      let uNama = String(rows[i][actualNamaIdx] || '').trim();
-      let uSection = secIdx !== -1 ? String(rows[i][secIdx] || '').trim() : '';
-      let uSubSection = subSecIdx !== -1 ? String(rows[i][subSecIdx] || '').trim() : '';
-      
-      if (!uNrp) continue;
-
-      if (dbMap.has(uNrp)) {
-        let targetDbRow = dbMap.get(uNrp);
-        
-        // Sync Nama jika berubah
-        let currentDbNama = String(dbSheet.getRange(targetDbRow, dbNamaIdx + 1).getValue()).trim();
-        if (currentDbNama !== uNama && uNama) {
-          dbSheet.getRange(targetDbRow, dbNamaIdx + 1).setValue(uNama);
-        }
-
-        // Paksa update Section di db_MP agar selalu sinkron dengan Section dari sheet user
-        if (dbSecIdx !== -1) {
-          dbSheet.getRange(targetDbRow, dbSecIdx + 1).setValue(uSection);
-        }
-
-        // Paksa update Superior di db_MP agar selalu sinkron dengan Sub Section dari sheet user
-        if (dbSupIdx !== -1) {
-          dbSheet.getRange(targetDbRow, dbSupIdx + 1).setValue(uSubSection);
-        }
-      } else {
-        // Jika NRP belum ada di db_MP, buat baris baru beserta datanya
-        let newRow = new Array(dbHeaders.length).fill('');
-        newRow[dbNrpIdx] = uNrp;
-        newRow[dbNamaIdx] = uNama;
-        if (dbSecIdx !== -1) newRow[dbSecIdx] = uSection;
-        if (dbSupIdx !== -1) newRow[dbSupIdx] = uSubSection;
-        
-        dbSheet.appendRow(newRow);
-        dbMap.set(uNrp, dbSheet.getLastRow());
-      }
-    }
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.toString() };
+/**
+ * Migrasi satu kali untuk membersihkan kolom legacy dari sheet Manpower.
+ * Jalankan manual dari Apps Script setelah kode diunggah.
+ */
+function removeLegacyManpowerColumns() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const manpowerSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
+  if (!manpowerSheet) {
+    throw new Error('Sheet Manpower tidak ditemukan.');
   }
+
+  const headers = manpowerSheet
+    .getRange(1, 1, 1, manpowerSheet.getLastColumn())
+    .getDisplayValues()[0]
+    .map(header => String(header).trim().toLowerCase());
+
+  const legacyIndexes = headers
+    .map((header, index) => (
+      header === 'section' || header === 'superior' || header === 'jabatan'
+        ? index + 1
+        : -1
+    ))
+    .filter(index => index !== -1)
+    .sort((a, b) => b - a);
+
+  legacyIndexes.forEach(column => manpowerSheet.deleteColumn(column));
+
+  return {
+    success: true,
+    deletedColumns: legacyIndexes.length,
+    message: legacyIndexes.length
+      ? 'Kolom Section, Superior, dan/atau Jabatan telah dihapus.'
+      : 'Kolom Section, Superior, dan Jabatan tidak ditemukan.'
+  };
 }
 
 function createTimeDrivenTriggers() {
@@ -103,6 +52,6 @@ function createTimeDrivenTriggers() {
 
   ScriptApp.newTrigger('runBackgroundSync')
     .timeBased()
-    .everyHours(1) 
+    .everyHours(1)
     .create();
 }
