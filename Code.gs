@@ -27,9 +27,6 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-/**
- * Mendapatkan data manpower dengan cepat pada saat page load awal.
- */
 function getManpowerDataFast() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -153,10 +150,6 @@ function getManpowerDataFast() {
   }
 }
 
-/**
- * Fungsi khusus untuk melakukan sinkronisasi binding dari sheet 'user' ke 'db_MP' 
- * termasuk header Status secara manual saat tombol Synchronize ditekan.
- */
 function executeManualSync() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
