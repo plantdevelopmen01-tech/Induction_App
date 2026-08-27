@@ -3,7 +3,7 @@
  * seperti sinkronisasi manual. Kolom Section, Superior, dan Jabatan tidak digunakan.
  */
 function runBackgroundSync() {
-  return executeManualSync();
+  return executeManualSyncInternal();
 }
 
 /**
