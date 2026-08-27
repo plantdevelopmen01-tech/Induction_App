@@ -150,10 +150,11 @@
                             <i id="theme-btn-icon" class="fa-solid fa-moon text-cyan-400"></i>
                             <span id="theme-btn-text">Gelap</span>
                         </button>
-                        <button id="btn-sync-data" onclick="loadSpreadsheetData(true)" class="px-3.5 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700/80 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-semibold rounded-xl text-xs transition flex items-center space-x-2 shadow-sm">
+                        <button id="btn-sync-data" onclick="loadSpreadsheetData(true)" class="hidden px-3.5 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700/80 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-semibold rounded-xl text-xs transition flex items-center space-x-2 shadow-sm">
                             <i class="fa-solid fa-rotate text-xs"></i>
                             <span id="btn-sync-text">Synchronize</span>
                         </button>
+                        <button id="btn-password-edit" onclick="openPasswordModal()" class="p-2 text-slate-400 hover:text-cyan-500 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-800 transition" title="Ubah Password"><i class="fa-solid fa-key text-base"></i></button>
                         <button onclick="logout()" class="p-2 text-slate-400 hover:text-rose-500 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-800 transition" title="Keluar"><i class="fa-solid fa-right-from-bracket text-base"></i></button>
                     </div>
                 </header>
@@ -214,9 +215,8 @@
                                             <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-36 text-center">Section</th>
                                             <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-32 text-center">Job Group</th>
                                             <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-36 text-center">Departemen</th>
-                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-24 text-center">Status</th>
                                             <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-40 text-center">Perusahaan</th>
-                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-32 text-center">Role</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-24 text-center">Status</th>
                                         </tr>
                                     </thead>
                                     <tbody id="manpower-table-body" class="divide-y divide-slate-200 dark:divide-slate-800/50 text-xs text-slate-700 dark:text-slate-300"></tbody>
@@ -235,6 +235,7 @@
                             <p class="text-xs text-slate-500 dark:text-slate-400">Kelola level hak akses (User, Admin, Administrator) langsung ke sheet user.</p>
                             <div class="flex flex-wrap items-center gap-2">
                                 <button onclick="openBatchRoleModal()" id="batch-role-btn" disabled class="px-3.5 py-2 bg-cyan-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-semibold rounded-xl text-xs transition flex items-center space-x-1.5"><i class="fa-solid fa-user-pen text-[11px]"></i><span>Ubah Role</span></button>
+                                <button onclick="resetSelectedPasswords()" id="reset-password-btn" disabled class="px-3.5 py-2 bg-amber-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-semibold rounded-xl text-xs transition flex items-center space-x-1.5"><i class="fa-solid fa-key text-[11px]"></i><span>Reset Password</span></button>
                                 <div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-2.5 text-slate-400"><i class="fa-solid fa-search text-xs"></i></span><input type="text" id="search-settings" oninput="settingsPage=1; this.value = this.value.toUpperCase(); renderSettingsTable()" placeholder="Cari global..." class="uppercase pl-8 pr-3 py-2 bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-cyan-500 w-56"></div>
                             </div>
                         </div>
@@ -269,8 +270,8 @@
     </div>
 
     <!-- ADD MANPOWER MODAL -->
-    <div id="add-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-xl">
-        <div class="bg-white dark:bg-slate-900/95 rounded-3xl max-w-3xl w-full shadow-[0_0_60px_rgba(6,182,212,0.15)] border border-slate-200 dark:border-cyan-500/30 overflow-hidden flex flex-col max-h-[92vh] text-slate-800 dark:text-slate-100 relative">
+    <div id="add-modal" class="hidden fixed inset-0 z-[60] pointer-events-auto flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-xl" style="z-index: 1000; pointer-events: auto;">
+        <div onclick="event.stopPropagation()" class="pointer-events-auto bg-white dark:bg-slate-900/95 rounded-3xl max-w-3xl w-full shadow-[0_0_60px_rgba(6,182,212,0.15)] border border-slate-200 dark:border-cyan-500/30 overflow-hidden flex flex-col max-h-[92vh] text-slate-800 dark:text-slate-100 relative" style="pointer-events: auto;">
             <div class="absolute -top-32 -right-32 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
             <div class="absolute -bottom-32 -left-32 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -362,10 +363,6 @@
                             <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Status Kepegawaian</label>
                             <input type="text" id="add-status" value="ACTIVE" readonly class="uppercase w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed focus:outline-none" title="Terkunci: Otomatis terisi Active">
                         </div>
-                        <div>
-                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">User Role</label>
-                            <input type="text" id="add-role" value="USER" readonly class="uppercase w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed focus:outline-none" title="Terkunci: Otomatis terisi User">
-                        </div>
                     </div>
                 </div>
             </form>
@@ -385,6 +382,18 @@
                 <button onclick="closeRoleModal()" class="px-4 py-2 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold rounded-xl text-xs">Batal</button>
                 <button onclick="executeBatchRoleUpdate()" class="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-md">Simpan</button>
             </div>
+        </div>
+    </div>
+
+    <div id="password-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+        <div onclick="event.stopPropagation()" class="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-cyan-500/30 space-y-4 text-slate-800 dark:text-white">
+            <div class="flex items-center justify-between"><h3 class="text-base font-bold text-cyan-600 dark:text-cyan-400">Ubah Password</h3><button type="button" onclick="closePasswordModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white p-1 rounded-lg"><i class="fa-solid fa-xmark text-lg"></i></button></div>
+            <form onsubmit="savePassword(event)" class="space-y-3">
+                <input id="current-password" type="password" required placeholder="Password lama" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-cyan-500">
+                <input id="new-password" type="password" minlength="6" required placeholder="Password baru (minimal 6 karakter)" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-cyan-500">
+                <input id="confirm-password" type="password" minlength="6" required placeholder="Ulangi password baru" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-cyan-500">
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800"><button type="button" onclick="closePasswordModal()" class="px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs">Batal</button><button type="submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs">Simpan</button></div>
+            </form>
         </div>
     </div>
 
@@ -410,7 +419,11 @@
                 </div>
                 <div class="flex items-center space-x-2">
                     <button type="button" onclick="closeViewModal()" class="px-3.5 py-1.5 border border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-semibold rounded-xl text-xs transition">Batal</button>
-                    <button type="button" onclick="triggerSaveManpower()" class="px-4 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/20 transition flex items-center space-x-1.5">
+                    <button type="button" id="edit-manpower-btn" onclick="enableManpowerEdit()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/20 transition flex items-center space-x-1.5">
+                        <i class="fa-solid fa-pen-to-square text-[11px]"></i>
+                        <span>Edit</span>
+                    </button>
+                    <button type="button" id="save-manpower-btn" onclick="triggerSaveManpower()" class="hidden px-4 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/20 transition flex items-center space-x-1.5">
                         <i class="fa-solid fa-floppy-disk text-[11px]"></i>
                         <span>Simpan</span>
                     </button>
@@ -420,6 +433,7 @@
             
             <form id="edit-manpower-form" onsubmit="saveManpowerDetail(event)" class="flex-1 overflow-y-auto p-5 pb-40 space-y-4 text-xs z-10">
                 <input type="hidden" id="edit-row-idx">
+                <fieldset id="edit-manpower-fields" disabled>
                 
                 <!-- GROUP 1: Informasi Utama Karyawan -->
                 <div class="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-cyan-500/20 space-y-3 relative overflow-visible transition-all">
@@ -481,8 +495,12 @@
                             <div id="container-custodian"></div>
                         </div>
                         <div>
-                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Status Kepegawaian</label>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Status</label>
                             <div id="container-status"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Status Karyawan</label>
+                            <div id="container-status-karyawan"></div>
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Category Kemitraan</label>
@@ -494,6 +512,7 @@
                 <!-- DYNAMIC GROUP CONTAINERS -->
                 <div id="db-dynamic-groups-wrapper" class="space-y-4"></div>
                 <div id="db-dynamic-fields-container" class="hidden"></div>
+                </fieldset>
             </form>
         </div>
     </div>
@@ -510,6 +529,49 @@
             let str = String(val).trim();
             if (str.startsWith("'")) str = str.substring(1).trim();
             return str.replace(/^0+/, '');
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function getSessionToken() {
+            return currentUser && (currentUser.sessionToken || currentUser.token);
+        }
+
+        function getDbValue(item, aliases) {
+            const record = item && item.dbRecord ? item.dbRecord : {};
+            const key = Object.keys(record).find(name => aliases.includes(String(name).toLowerCase().trim()));
+            return key ? String(record[key] || '').trim() : '';
+        }
+
+        function isCreatedField(field) {
+            const normalized = String(field || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+            return ['created', 'created at', 'created date', 'tanggal created', 'tanggal dibuat'].includes(normalized);
+        }
+
+        function getCustodianOptions() {
+            if (window._custodianReferenceOptions) return window._custodianReferenceOptions;
+            window._custodianReferenceOptions = manpowerData.filter(item => item.nrp && item.nama)
+                .map(item => `${item.nrp} | ${item.nama}`)
+                .filter((value, index, values) => values.indexOf(value) === index)
+                .sort();
+            return window._custodianReferenceOptions;
+        }
+
+        function custodianDisplayValue(name) {
+            const target = String(name || '').trim().toUpperCase();
+            return getCustodianOptions().find(option => option.split(' | ').slice(1).join(' | ').toUpperCase() === target) || '';
+        }
+
+        function custodianNameValue(value) {
+            const parts = String(value || '').split(' | ');
+            return parts.length > 1 ? parts.slice(1).join(' | ').trim() : String(value || '').trim();
         }
 
         function initTheme() {
@@ -678,7 +740,7 @@
                     if (bgSync) bgSync.classList.add('hidden');
                     if (syncBtnText) syncBtnText.innerText = 'Synchronize';
                     showToast('Gagal sinkronisasi: ' + err.message, 'error');
-                }).executeManualSync() : google.script.run.withSuccessHandler(function(res) {
+                }).executeManualSync({ sessionToken: getSessionToken() }) : google.script.run.withSuccessHandler(function(res) {
                     manpowerData = res.data || [];
                     dbFieldsList = res.dbFields || [];
                     initAppData();
@@ -705,6 +767,7 @@
         }
 
         function initAppData() {
+            window._custodianReferenceOptions = null;
             renderFilterDropdowns();
             renderDashFilterDropdowns();
             renderDashboardOverview();
@@ -715,7 +778,8 @@
             if (savedUser) {
                 try {
                     currentUser = JSON.parse(savedUser);
-                    showMainApp();
+                    if (currentUser.sessionToken) showMainApp();
+                    else showLoginView();
                 } catch(e) {
                     showLoginView();
                 }
@@ -750,18 +814,117 @@
                 if (nameEl) nameEl.innerText = displayName;
                 if (roleEl) roleEl.innerText = displayRole;
             }
+            renderManpowerTable();
+            const addButton = document.querySelector('#view-manpower button[onclick="openAddModal()"]');
+            const deleteButton = document.getElementById('delete-mp-btn');
+            const syncButton = document.getElementById('btn-sync-data');
+            const roleSettingsButton = document.getElementById('nav-settings');
+            if (addButton) addButton.classList.toggle('hidden', !isAdminUser());
+            if (deleteButton) deleteButton.classList.toggle('hidden', !isAdminUser());
+            if (syncButton) syncButton.classList.toggle('hidden', !isAdminUser());
+            if (roleSettingsButton) roleSettingsButton.classList.toggle('hidden', !isAdministratorUser());
+        }
+
+        function isAdminUser() {
+            const role = String(currentUser && currentUser.role || 'user').toLowerCase();
+            return role === 'admin' || role === 'administrator';
+        }
+
+        function isAdministratorUser() {
+            return String(currentUser && currentUser.role || 'user').toLowerCase() === 'administrator';
+        }
+
+        function getVisibleManpowerData() {
+            if (isAdminUser() || !currentUser) return manpowerData;
+            const currentNrp = normalizeNrp(currentUser.nrp);
+            return manpowerData.filter(item => normalizeNrp(item.nrp) === currentNrp);
+        }
+
+        function setManpowerEditMode(enabled) {
+            const fields = document.getElementById('edit-manpower-fields');
+            const editButton = document.getElementById('edit-manpower-btn');
+            const saveButton = document.getElementById('save-manpower-btn');
+            if (fields) fields.disabled = !enabled;
+            document.querySelectorAll('#edit-manpower-fields [id^="box-ms-"], #edit-manpower-fields [id^="drop-ms-"]').forEach(element => {
+                element.style.pointerEvents = enabled ? 'auto' : 'none';
+            });
+            if (editButton) editButton.classList.toggle('hidden', enabled);
+            if (saveButton) saveButton.classList.toggle('hidden', !enabled);
+        }
+
+        function enableManpowerEdit() {
+            setManpowerEditMode(true);
+        }
+
+        function openPasswordModal() {
+            document.getElementById('password-modal').classList.remove('hidden');
+            document.getElementById('current-password').focus();
+        }
+
+        function closePasswordModal() {
+            document.getElementById('password-modal').classList.add('hidden');
+            document.querySelector('#password-modal form').reset();
+        }
+
+        function savePassword(event) {
+            event.preventDefault();
+            const newPassword = document.getElementById('new-password').value;
+            if (newPassword !== document.getElementById('confirm-password').value) {
+                showToast('Konfirmasi password tidak sama.', 'error');
+                return;
+            }
+            showActionLoader('Menyimpan password...');
+            google.script.run
+                .withSuccessHandler(function(res) {
+                    hideActionLoader();
+                    if (res.success) {
+                        closePasswordModal();
+                        showToast('Password berhasil diubah.', 'success');
+                    } else {
+                        showToast('Gagal: ' + res.error, 'error');
+                    }
+                })
+                .withFailureHandler(function(err) {
+                    hideActionLoader();
+                    showToast('Gagal: ' + (err.message || 'mengubah password.'), 'error');
+                })
+                .changePassword({
+                    currentPassword: document.getElementById('current-password').value,
+                    newPassword: newPassword,
+                    sessionToken: getSessionToken()
+                });
         }
 
         function handleLogin(event) {
             event.preventDefault();
             const nrp = document.getElementById('login-nrp').value.trim().toUpperCase();
-            const normInput = normalizeNrp(nrp);
-            
-            const found = manpowerData.find(d => normalizeNrp(d.nrp) === normInput) || 
-                        manpowerData.find(d => String(d.nrp).trim() === nrp) || 
-                        { nrp: nrp, nama: nrp, role: 'user' };
-            
-            currentUser = found;
+            const password = document.getElementById('login-password').value;
+
+            if (typeof google !== 'undefined' && google.script && google.script.run) {
+                google.script.run
+                    .withSuccessHandler(function(res) {
+                        if (!res.success) {
+                            showToast(res.error || 'NRP atau password tidak valid.', 'error');
+                            return;
+                        }
+                        currentUser = res;
+                        localStorage.setItem('mp_user', JSON.stringify(currentUser));
+                        showMainApp();
+                        showToast(`Selamat datang, ${currentUser.nama || currentUser.nrp}!`, 'success');
+                    })
+                    .withFailureHandler(function(err) {
+                        showToast(err.message || 'Login gagal.', 'error');
+                    })
+                    .authenticateUser(nrp, password);
+                return;
+            }
+
+            const found = manpowerData.find(d => normalizeNrp(d.nrp) === normalizeNrp(nrp));
+            if (!found || password !== nrp) {
+                showToast('NRP atau password tidak valid.', 'error');
+                return;
+            }
+            currentUser = { ...found, sessionToken: 'mock-session' };
             localStorage.setItem('mp_user', JSON.stringify(currentUser));
             showMainApp();
             showToast(`Selamat datang, ${currentUser.nama || currentUser.nrp}!`, 'success');
@@ -775,6 +938,7 @@
         }
 
         function switchTab(tabId) {
+            if (tabId === 'settings' && !isAdministratorUser()) return;
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             document.querySelectorAll('.nav-btn').forEach(btn => {
                 btn.classList.remove('text-cyan-600', 'dark:text-cyan-400', 'bg-cyan-500/10', 'border', 'border-cyan-500/20');
@@ -856,7 +1020,7 @@
                 html += `
                     <div class="space-y-1">
                         <div class="flex justify-between text-xs font-semibold">
-                            <span class="text-slate-700 dark:text-slate-300 truncate max-w-[70%]">${name}</span>
+                            <span class="text-slate-700 dark:text-slate-300 truncate max-w-[70%]">${escapeHtml(name)}</span>
                             <span class="text-cyan-600 dark:text-cyan-400 font-mono">${count} (${pct}%)</span>
                         </div>
                         <div class="w-full bg-slate-200 dark:bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-300 dark:border-slate-800">
@@ -932,7 +1096,7 @@
                         hideActionLoader();
                         showToast('Gagal menghapus: ' + err.message, 'error');
                     })
-                    .deleteManpowerRows(nrpList);
+                    .deleteManpowerRows({ nrpList: nrpList, sessionToken: getSessionToken() });
             } else {
                 setTimeout(() => {
                     const normSet = new Set(Array.from(selectedMpNrps).map(n => normalizeNrp(n)));
@@ -967,7 +1131,7 @@
         }
 
         function closeAllDropdowns(e) {
-            document.querySelectorAll('[id^="drop-filter-"], [id^="drop-dash-"], [id^="drop-ms-"]').forEach(el => {
+            document.querySelectorAll('.filter-dropdown, .field-dropdown').forEach(el => {
                 el.classList.add('hidden');
                 let parentRel = el.closest('.relative');
                 if (parentRel) parentRel.style.zIndex = '';
@@ -991,7 +1155,7 @@
 
             let dropdown = document.createElement('div');
             dropdown.id = `drop-${uniqueKey}`;
-            dropdown.className = "hidden absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-40 p-2 space-y-1";
+            dropdown.className = "filter-dropdown hidden absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-40 p-2 space-y-1";
 
             let actionDiv = document.createElement('div');
             actionDiv.className = "flex items-center justify-between px-2 py-1 border-b border-slate-200 dark:border-slate-800 text-[10px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400";
@@ -1019,7 +1183,7 @@
 
         window.toggleGenericFilter = function(uniqueKey) {
             event.stopPropagation();
-            document.querySelectorAll('[id^="drop-filter-"], [id^="drop-dash-"]').forEach(el => {
+            document.querySelectorAll('.filter-dropdown').forEach(el => {
                 if (el.id !== `drop-${uniqueKey}`) el.classList.add('hidden');
             });
             let drop = document.getElementById(`drop-${uniqueKey}`);
@@ -1042,7 +1206,8 @@
 
             box.innerHTML = '';
             selectedSet.forEach(val => {
-                box.innerHTML += `<span class="px-2 py-0.5 bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 rounded-lg text-[10px] font-semibold flex items-center space-x-1"><span>${val}</span><i class="fa-solid fa-xmark ml-1 cursor-pointer hover:text-slate-900 dark:hover:text-white" onclick="event.stopPropagation(); removeGenericFilterItem('${uniqueKey}', '${val}')"></i></span>`;
+                const encodedVal = encodeURIComponent(String(val));
+                box.innerHTML += `<span class="px-2 py-0.5 bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 rounded-lg text-[10px] font-semibold flex items-center space-x-1"><span>${escapeHtml(val)}</span><i class="fa-solid fa-xmark ml-1 cursor-pointer hover:text-slate-900 dark:hover:text-white" onclick="event.stopPropagation(); removeGenericFilterItem('${uniqueKey}', decodeURIComponent('${encodedVal}'))"></i></span>`;
             });
 
             let inlineInput = document.createElement('input');
@@ -1067,8 +1232,8 @@
                 let isChecked = selectedSet.has(opt) ? 'checked' : '';
                 listDiv.innerHTML += `
                     <label class="flex items-center space-x-2 px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-lg cursor-pointer text-xs text-slate-700 dark:text-slate-300" onclick="event.stopPropagation()">
-                        <input type="checkbox" ${isChecked} onchange="toggleGenericFilterItem('${uniqueKey}', '${opt}')" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5">
-                        <span class="font-medium truncate">${opt}</span>
+                        <input type="checkbox" ${isChecked} onchange="toggleGenericFilterItem('${uniqueKey}', decodeURIComponent('${encodeURIComponent(opt)}'))" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5">
+                        <span class="font-medium truncate">${escapeHtml(opt)}</span>
                     </label>
                 `;
             });
@@ -1146,7 +1311,8 @@
         }
 
         function renderManpowerTable() {
-            const filtered = manpowerData.filter(item => matchesMultiFilters(item));
+            const visibleData = getVisibleManpowerData();
+            const filtered = visibleData.filter(item => matchesMultiFilters(item));
             const totalPages = Math.ceil(filtered.length / pageSize) || 1;
             if (mpPage > totalPages) mpPage = totalPages;
             
@@ -1158,20 +1324,19 @@
 
             paginatedItems.forEach(item => {
                 const isChecked = selectedMpNrps.has(item.nrp) ? 'checked' : '';
-                const safeNrp = String(item.nrp || '').replace(/'/g, "\\'");
+                const safeNrp = encodeURIComponent(String(item.nrp || ''));
                 tbody.innerHTML += `
-                    <tr class="hover:bg-slate-100 dark:hover:bg-slate-800/40 transition border-b border-slate-200 dark:border-slate-800/50 cursor-pointer" onclick="openViewModal('${safeNrp}')">
-                        <td class="p-3 text-center" onclick="event.stopPropagation()"><input type="checkbox" ${isChecked} onclick="toggleMpSelection('${safeNrp}')" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5"></td>
+                    <tr class="hover:bg-slate-100 dark:hover:bg-slate-800/40 transition border-b border-slate-200 dark:border-slate-800/50">
+                        <td class="p-3 text-center" onclick="event.stopPropagation()"><input type="checkbox" ${isChecked} onclick="toggleMpSelection(decodeURIComponent('${safeNrp}'))" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5"></td>
                         <td class="p-3 text-center" onclick="event.stopPropagation()"><button type="button" onclick="openViewModal('${safeNrp}')" class="px-2.5 py-1.5 bg-cyan-500/10 hover:bg-cyan-500 hover:text-white text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 rounded-lg text-xs transition cursor-pointer" title="Lihat Detail"><i class="fa-solid fa-eye pointer-events-none"></i></button></td>
-                        <td class="p-3 font-mono text-cyan-600 dark:text-cyan-300 font-semibold">${item.nrp}</td>
-                        <td class="p-3 font-bold text-slate-900 dark:text-white">${item.nama}</td>
-                        <td class="p-3 truncate">${item.position || ''}</td>
-                        <td class="p-3 truncate">${item.section || ''}</td>
-                        <td class="p-3 truncate">${item.jobgroup || ''}</td>
-                        <td class="p-3 truncate">${item.departemen || ''}</td>
-                        <td class="p-3 text-center"><span class="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold uppercase">${item.status || 'Active'}</span></td>
-                        <td class="p-3 truncate">${item.perusahaan || ''}</td>
-                        <td class="p-3 text-center"><span class="px-2 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-300 rounded-full text-[10px] font-bold uppercase tracking-wider">${item.role || 'user'}</span></td>
+                        <td class="p-3 font-mono text-cyan-600 dark:text-cyan-300 font-semibold">${escapeHtml(item.nrp)}</td>
+                        <td class="p-3 font-bold text-slate-900 dark:text-white">${escapeHtml(item.nama)}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.position || '')}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.section || '')}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.jobgroup || '')}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.departemen || '')}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.perusahaan || '')}</td>
+                        <td class="p-3 text-center"><span class="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold uppercase">${escapeHtml(item.status || 'Active')}</span></td>
                     </tr>
                 `;
             });
@@ -1195,17 +1360,18 @@
 
             paginatedItems.forEach(item => {
                 const isChecked = selectedSettingsNrps.has(item.nrp) ? 'checked' : '';
+                const safeNrp = encodeURIComponent(String(item.nrp || ''));
                 tbody.innerHTML += `
                     <tr class="hover:bg-slate-100 dark:hover:bg-slate-800/40 transition border-b border-slate-200 dark:border-slate-800/50">
-                        <td class="p-3 text-center"><input type="checkbox" ${isChecked} onclick="toggleSettingsSelection('${item.nrp}')" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-500 w-3.5 h-3.5"></td>
-                        <td class="p-3 text-center"><button type="button" onclick="openSingleRoleModal('${item.nrp}')" class="px-2 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-cyan-600 hover:text-white text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px]"><i class="fa-solid fa-pen-to-square"></i></button></td>
-                        <td class="p-3 font-mono text-cyan-600 dark:text-cyan-300 font-semibold">${item.nrp}</td>
-                        <td class="p-3 font-bold text-slate-900 dark:text-white">${item.nama}</td>
-                        <td class="p-3 truncate">${item.position || ''}</td>
-                        <td class="p-3 truncate">${item.jobgroup || ''}</td>
-                        <td class="p-3 truncate">${item.section || ''}</td>
-                        <td class="p-3 truncate">${item.perusahaan || ''}</td>
-                        <td class="p-3 text-center"><span class="px-2.5 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-300 rounded-full text-[10px] font-bold uppercase tracking-wider">${item.role || 'user'}</span></td>
+                        <td class="p-3 text-center"><input type="checkbox" ${isChecked} onclick="toggleSettingsSelection(decodeURIComponent('${safeNrp}'))" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-500 w-3.5 h-3.5"></td>
+                        <td class="p-3 text-center"><button type="button" onclick="openSingleRoleModal(decodeURIComponent('${safeNrp}'))" class="px-2 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-cyan-600 hover:text-white text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px]"><i class="fa-solid fa-pen-to-square"></i></button></td>
+                        <td class="p-3 font-mono text-cyan-600 dark:text-cyan-300 font-semibold">${escapeHtml(item.nrp)}</td>
+                        <td class="p-3 font-bold text-slate-900 dark:text-white">${escapeHtml(item.nama)}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.position || '')}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.jobgroup || '')}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.section || '')}</td>
+                        <td class="p-3 truncate">${escapeHtml(item.perusahaan || '')}</td>
+                        <td class="p-3 text-center"><span class="px-2.5 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-300 rounded-full text-[10px] font-bold uppercase tracking-wider">${escapeHtml(item.role || 'user')}</span></td>
                     </tr>
                 `;
             });
@@ -1213,6 +1379,7 @@
             document.getElementById('settings-pagination-status').innerText = `Menampilkan ${startIdx + 1}-${Math.min(startIdx + pageSize, filtered.length)} dari ${filtered.length} data`;
             renderPaginationButtons('settings-pagination-buttons', settingsPage, totalPages, (p) => { settingsPage = p; renderSettingsTable(); });
             document.getElementById('batch-role-btn').disabled = selectedSettingsNrps.size === 0;
+            document.getElementById('reset-password-btn').disabled = selectedSettingsNrps.size === 0;
         }
 
         function renderPaginationButtons(containerId, currentPage, totalPages, callbackName) {
@@ -1246,7 +1413,7 @@
         }
 
         function toggleSelectAllManpower(cb) {
-            const filtered = manpowerData.filter(item => matchesMultiFilters(item));
+            const filtered = getVisibleManpowerData().filter(item => matchesMultiFilters(item));
             filtered.forEach(item => {
                 if (cb.checked) selectedMpNrps.add(item.nrp);
                 else selectedMpNrps.delete(item.nrp);
@@ -1266,6 +1433,30 @@
                 else selectedSettingsNrps.delete(item.nrp);
             });
             renderSettingsTable();
+        }
+
+        function resetSelectedPasswords() {
+            const nrpList = Array.from(selectedSettingsNrps);
+            if (!nrpList.length) return;
+            if (!confirm(`Reset password untuk ${nrpList.length} akun ke NRP masing-masing?`)) return;
+
+            showActionLoader('Mereset password akun terpilih...');
+            google.script.run
+                .withSuccessHandler(function(res) {
+                    hideActionLoader();
+                    if (res.success) {
+                        selectedSettingsNrps.clear();
+                        renderSettingsTable();
+                        showToast(`Password ${res.count || nrpList.length} akun berhasil direset.`, 'success');
+                    } else {
+                        showToast('Gagal: ' + res.error, 'error');
+                    }
+                })
+                .withFailureHandler(function(err) {
+                    hideActionLoader();
+                    showToast('Gagal: ' + (err.message || 'mereset password.'), 'error');
+                })
+                .resetPasswordsBatch({ nrpList: nrpList, sessionToken: getSessionToken() });
         }
 
         function isDateField(fieldName) {
@@ -1303,7 +1494,7 @@
 
             let dropdown = document.createElement('div');
             dropdown.id = `drop-${uniqueKey}`;
-            dropdown.className = "hidden absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200 dark:border-cyan-500/40 rounded-2xl shadow-2xl z-50 p-2 space-y-1";
+            dropdown.className = "field-dropdown hidden absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200 dark:border-cyan-500/40 rounded-2xl shadow-2xl z-50 p-2 space-y-1";
 
             let listDiv = document.createElement('div');
             listDiv.id = `list-${uniqueKey}`;
@@ -1322,7 +1513,7 @@
             window[`_fieldOptions_${uniqueKey}`] = [...optionsList];
             window[`_fieldSelected_${uniqueKey}`] = initialValues;
 
-            setTimeout(() => renderFieldDropdownUI(uniqueKey), 0);
+            setTimeout(() => renderFieldDropdownUI(uniqueKey, false), 0);
             return container;
         }
 
@@ -1347,6 +1538,7 @@
             if (!drop.classList.contains('hidden')) {
                 if (parentRel) parentRel.style.zIndex = '50';
                 if (parentCard) parentCard.style.zIndex = '40';
+                renderFieldDropdownUI(uniqueKey, true);
                 let input = document.getElementById(`inline-input-${uniqueKey}`);
                 if (input) input.focus();
             } else {
@@ -1355,7 +1547,7 @@
             }
         };
 
-        window.renderFieldDropdownUI = function(uniqueKey) {
+        window.renderFieldDropdownUI = function(uniqueKey, renderOptions = true) {
             let box = document.getElementById(`box-${uniqueKey}`);
             let listDiv = document.getElementById(`list-${uniqueKey}`);
             if (!box || !listDiv) return;
@@ -1367,7 +1559,8 @@
 
             box.innerHTML = '';
             selectedSet.forEach(val => {
-                box.innerHTML += `<span class="px-2 py-0.5 bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 rounded-lg text-[11px] font-semibold flex items-center space-x-1"><span>${val}</span><i class="fa-solid fa-xmark ml-1 cursor-pointer hover:text-slate-900 dark:hover:text-white" onclick="event.stopPropagation(); removeFieldValue('${uniqueKey}', '${val}')"></i></span>`;
+                const encodedVal = encodeURIComponent(String(val));
+                box.innerHTML += `<span class="px-2 py-0.5 bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 rounded-lg text-[11px] font-semibold flex items-center space-x-1"><span>${escapeHtml(val)}</span><i class="fa-solid fa-xmark ml-1 cursor-pointer hover:text-slate-900 dark:hover:text-white" onclick="event.stopPropagation(); removeFieldValue('${uniqueKey}', decodeURIComponent('${encodedVal}'))"></i></span>`;
             });
 
             let inlineInput = document.createElement('input');
@@ -1384,25 +1577,36 @@
                 hiddenInput.value = Array.from(selectedSet).join(', ');
             }
 
-            let searchVal = currentSearchVal.toLowerCase();
-            listDiv.innerHTML = '';
-            let filtered = options.filter(opt => opt.toLowerCase().includes(searchVal));
-
-            if (filtered.length === 0 && searchVal) {
-                let upperVal = currentSearchVal.trim().toUpperCase();
-                listDiv.innerHTML = `<div class="p-2 text-xs text-cyan-600 dark:text-cyan-400 italic cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 rounded" onclick="addNewFieldInline('${uniqueKey}', '${upperVal}')">Tekan Enter untuk menambah "<b>${upperVal}</b>"</div>`;
+            if (!renderOptions) {
+                listDiv.innerHTML = '';
                 return;
             }
 
-            filtered.forEach(opt => {
+            let searchVal = currentSearchVal.toLowerCase();
+            listDiv.innerHTML = '';
+            let visibleOptions = [];
+            for (let index = 0; index < options.length && visibleOptions.length < 100; index++) {
+                if (options[index].toLowerCase().includes(searchVal)) visibleOptions.push(options[index]);
+            }
+
+            if (visibleOptions.length === 0 && searchVal) {
+                let upperVal = currentSearchVal.trim().toUpperCase();
+                listDiv.innerHTML = `<div class="p-2 text-xs text-cyan-600 dark:text-cyan-400 italic cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 rounded" onclick="addNewFieldInline('${uniqueKey}', decodeURIComponent('${encodeURIComponent(upperVal)}'))">Tekan Enter untuk menambah "<b>${escapeHtml(upperVal)}</b>"</div>`;
+                return;
+            }
+
+            listDiv.innerHTML = visibleOptions.map(opt => {
                 let isChecked = selectedSet.has(opt) ? 'checked' : '';
-                listDiv.innerHTML += `
+                return `
                     <label class="flex items-center space-x-2 px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-lg cursor-pointer text-xs text-slate-700 dark:text-slate-200" onclick="event.stopPropagation()">
-                        <input type="checkbox" ${isChecked} onchange="toggleFieldValue('${uniqueKey}', '${opt}')" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5">
-                        <span class="font-medium truncate">${opt}</span>
+                        <input type="checkbox" ${isChecked} onchange="toggleFieldValue('${uniqueKey}', decodeURIComponent('${encodeURIComponent(opt)}'))" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5">
+                        <span class="font-medium truncate">${escapeHtml(opt)}</span>
                     </label>
                 `;
-            });
+            }).join('');
+            if (visibleOptions.length === 100) {
+                listDiv.innerHTML += '<div class="p-2 text-[10px] text-slate-400 text-center">Gunakan pencarian untuk mempersempit</div>';
+            }
         };
 
         window.filterFieldInline = function(uniqueKey) {
@@ -1457,6 +1661,11 @@
         };
 
         function openAddModal() {
+            const loader = document.getElementById('global-loader');
+            if (loader) {
+                loader.classList.add('hidden');
+                loader.classList.remove('opacity-0');
+            }
             const addNrp = document.getElementById('add-nrp');
             const addNama = document.getElementById('add-nama');
             
@@ -1468,7 +1677,7 @@
             const uniqueJobRanks = [...new Set(manpowerData.map(d => d.jobrank).filter(Boolean))].sort();
             const uniqueSections = [...new Set(manpowerData.map(d => d.section).filter(Boolean))].sort();
             const uniqueSubSections = [...new Set(manpowerData.map(d => d.subsection).filter(Boolean))].sort();
-            const uniqueCustodians = [...new Set(manpowerData.map(d => d.custodian).filter(Boolean))].sort();
+            const uniqueCustodians = getCustodianOptions();
             const uniqueDepartemens = [...new Set(manpowerData.map(d => d.departemen).filter(Boolean))].sort();
             const uniqueCompanies = [...new Set(manpowerData.map(d => d.perusahaan).filter(Boolean))].sort();
             const uniqueCategories = [...new Set(manpowerData.map(d => d.category).filter(Boolean))].sort();
@@ -1513,7 +1722,7 @@
                 jobrank: document.getElementById('add-jobrank')?.value.trim().toUpperCase() || '',
                 section: document.getElementById('add-section')?.value.trim().toUpperCase() || '',
                 subsection: document.getElementById('add-subsection')?.value.trim().toUpperCase() || '',
-                custodian: document.getElementById('add-custodian')?.value.trim().toUpperCase() || '',
+                custodian: custodianNameValue(document.getElementById('add-custodian')?.value).toUpperCase(),
                 departemen: document.getElementById('add-departemen')?.value.trim().toUpperCase() || '',
                 status: 'ACTIVE',
                 perusahaan: document.getElementById('add-perusahaan')?.value.trim().toUpperCase() || '',
@@ -1551,9 +1760,15 @@
                     })
                     .withFailureHandler(function(err) {
                         hideActionLoader();
-                        showToast('Error: ' + err.message, 'error');
+                        const message = err.message || 'Gagal menyimpan data.';
+                        if (message.includes('Sesi')) {
+                            localStorage.removeItem('mp_user');
+                            currentUser = null;
+                            showLoginView();
+                        }
+                        showToast('Error: ' + message, 'error');
                     })
-                    .createNewManpower({ item: newManpower, dbUpdates: dbUpdates });
+                    .createNewManpower({ item: newManpower, dbUpdates: dbUpdates, sessionToken: getSessionToken() });
             } else {
                 setTimeout(() => {
                     manpowerData.unshift({
@@ -1575,6 +1790,7 @@
 
         function openViewModal(nrp) {
             try {
+                nrp = decodeURIComponent(nrp);
                 const normTarget = normalizeNrp(nrp);
                 const item = manpowerData.find(d => normalizeNrp(d.nrp) === normTarget || String(d.nrp).trim() === String(nrp).trim() || String(d.rowIdx) === String(nrp));
                 if (!item) {
@@ -1594,7 +1810,7 @@
                 const uniqueJobRanks = [...new Set(manpowerData.map(d => d.jobrank).filter(Boolean))].sort();
                 const uniqueSections = [...new Set(manpowerData.map(d => d.section).filter(Boolean))].sort();
                 const uniqueSubSections = [...new Set(manpowerData.map(d => d.subsection).filter(Boolean))].sort();
-                const uniqueCustodians = [...new Set(manpowerData.map(d => d.custodian).filter(Boolean))].sort();
+                const uniqueCustodians = getCustodianOptions();
                 const uniqueDepartemens = [...new Set(manpowerData.map(d => d.departemen).filter(Boolean))].sort();
                 const uniqueStatuses = [...new Set(manpowerData.map(d => d.status).filter(Boolean))].sort();
                 if (uniqueStatuses.length === 0) uniqueStatuses.push("Active", "Inactive", "Resign");
@@ -1614,9 +1830,12 @@
                 setContainer('container-jobrank', 'edit-jobrank', item.jobrank, uniqueJobRanks);
                 setContainer('container-section', 'edit-section', item.section, uniqueSections);
                 setContainer('container-subsection', 'edit-subsection', item.subsection, uniqueSubSections);
-                setContainer('container-custodian', 'edit-custodian', item.custodian, uniqueCustodians);
+                setContainer('container-custodian', 'edit-custodian', custodianDisplayValue(item.custodian), uniqueCustodians);
                 setContainer('container-departemen', 'edit-departemen', item.departemen, uniqueDepartemens);
                 setContainer('container-status', 'edit-status', item.status || 'Active', uniqueStatuses);
+                const statusKaryawan = item.manpowerStatus || getDbValue(item, ['status karyawan', 'status karyawan ']);
+                const statusKaryawanOptions = [...new Set(manpowerData.map(data => data.manpowerStatus || getDbValue(data, ['status karyawan', 'status karyawan '])).filter(Boolean))].sort();
+                setContainer('container-status-karyawan', 'edit-status-karyawan', statusKaryawan, statusKaryawanOptions);
                 setContainer('container-category', 'edit-category', item.category || '', uniqueCategories);
                 setContainer('container-perusahaan', 'edit-perusahaan', item.perusahaan, uniqueCompanies);
 
@@ -1637,7 +1856,7 @@
 
                 (dbFieldsList || []).forEach(field => {
                     const lower = String(field || '').toLowerCase().trim();
-                    if (lower === 'nrp' || lower === 'nama' || lower === 'superior' || lower === 'perusahaan' || lower === 'category' || lower === 'category kemitraan' || lower === 'kategori akun' || lower === 'kategori') return;
+                    if (lower === 'nrp' || lower === 'nama' || lower === 'superior' || lower === 'perusahaan' || lower === 'section' || lower === 'status karyawan' || isCreatedField(field) || lower === 'category' || lower === 'category kemitraan' || lower === 'kategori akun' || lower === 'kategori') return;
                     
                     if (lower === 'last status hasil mcu' || lower.includes('status hasil mcu') || lower.includes('status mcu')) {
                         otherFields.push(field);
@@ -1702,7 +1921,7 @@
                         }
 
                         let wrapper = document.createElement('div');
-                        wrapper.innerHTML = `<label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">${displayLabel}</label>`;
+                        wrapper.innerHTML = `<label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">${escapeHtml(displayLabel)}</label>`;
 
                         if (lowerField === 'sub section / section' || lowerField === 'sub section' || lowerField === 'subsection') {
                             let lockedInput = document.createElement('input');
@@ -1774,6 +1993,15 @@
                             textAreaInput.setAttribute('oninput', 'this.value = this.value.toUpperCase()');
                             textAreaInput.className = "uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 resize-y";
                             wrapper.appendChild(textAreaInput);
+                        } else if (lowerField.includes('nama kontak darurat')) {
+                            let emergencyNameInput = document.createElement('input');
+                            emergencyNameInput.type = 'text';
+                            emergencyNameInput.id = `db-field-${field}`;
+                            emergencyNameInput.value = String(rawVal).toUpperCase();
+                            emergencyNameInput.placeholder = "MASUKKAN NAMA KONTAK DARURAT...";
+                            emergencyNameInput.setAttribute('oninput', 'this.value = this.value.toUpperCase()');
+                            emergencyNameInput.className = "uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50";
+                            wrapper.appendChild(emergencyNameInput);
                         } else if (lowerField.includes('telepon') || lowerField.includes('phone') || lowerField.includes('hp') || lowerField.includes('whatsapp') || lowerField.includes('darurat')) {
                             let phoneInput = document.createElement('input');
                             phoneInput.type = 'tel';
@@ -1805,6 +2033,7 @@
 
                 const viewModal = document.getElementById('view-modal');
                 if (viewModal) {
+                    setManpowerEditMode(false);
                     viewModal.classList.remove('hidden');
                 }
             } catch (err) {
@@ -1833,9 +2062,10 @@
                 jobrank: document.getElementById('edit-jobrank').value.trim().toUpperCase(),
                 section: document.getElementById('edit-section').value.trim().toUpperCase(),
                 subsection: document.getElementById('edit-subsection').value.trim().toUpperCase(),
-                custodian: document.getElementById('edit-custodian').value.trim().toUpperCase(),
+                custodian: custodianNameValue(document.getElementById('edit-custodian').value).toUpperCase(),
                 departemen: document.getElementById('edit-departemen').value.trim().toUpperCase(),
                 status: document.getElementById('edit-status').value.trim().toUpperCase(),
+                manpowerStatus: document.getElementById('edit-status-karyawan')?.value?.trim()?.toUpperCase() || '',
                 perusahaan: document.getElementById('edit-perusahaan').value.trim().toUpperCase(),
                 category: document.getElementById('edit-category')?.value?.trim()?.toUpperCase() || ''
             };
@@ -1854,6 +2084,10 @@
                     }
                 }
             });
+            if (document.getElementById('edit-status-karyawan')) {
+                const statusField = dbFieldsList.find(field => field.toLowerCase().trim() === 'status karyawan');
+                if (statusField) dbUpdates[statusField] = document.getElementById('edit-status-karyawan').value.trim().toUpperCase();
+            }
 
             showActionLoader("Menyimpan pembaruan data...");
             closeViewModal();
@@ -1895,7 +2129,7 @@
                         hideActionLoader();
                         showToast('Error: ' + err.message, 'error');
                     })
-                    .updateSingleManpower({ item: updated, dbUpdates: dbUpdates });
+                    .updateSingleManpower({ item: updated, dbUpdates: dbUpdates, sessionToken: getSessionToken() });
             } else {
                 setTimeout(() => {
                     const normTarget = normalizeNrp(updated.nrp);
@@ -1976,7 +2210,7 @@
                         hideActionLoader();
                         showToast('Error: ' + err.message, 'error');
                     })
-                    .updateRolesBatch(nrpList, newRole);
+                    .updateRolesBatch({ nrpList: nrpList, newRole: newRole, sessionToken: getSessionToken() });
             } else {
                 setTimeout(() => {
                     const normSet = new Set(nrpList.map(n => normalizeNrp(n)));
