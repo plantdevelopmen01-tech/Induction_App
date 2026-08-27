@@ -1,6 +1,266 @@
 const SPREADSHEET_ID = "1NTyd6qsyj95Q5og8ErAOWqZM_HroyzYxYBuJ1069jyc";
 const SHEET_NAME = "user"; 
 const DB_MP_SHEET_NAME = "Manpower";
+const SESSION_TTL_SECONDS = 21600;
+const ALLOWED_ROLES = ['user', 'admin', 'administrator'];
+
+function getSessionSecret() {
+  const properties = PropertiesService.getScriptProperties();
+  let secret = properties.getProperty('SESSION_SECRET');
+  if (!secret) {
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    properties.setProperty('SESSION_SECRET', secret);
+  }
+  return secret;
+}
+
+function createSessionToken(user) {
+  const payload = {
+    nrp: user.nrp,
+    role: user.role,
+    nama: user.nama,
+    expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000
+  };
+  const encodedPayload = Utilities.base64EncodeWebSafe(JSON.stringify(payload));
+  const signature = Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(encodedPayload, getSessionSecret())
+  );
+  return encodedPayload + '.' + signature;
+}
+
+function normalizeRole(value) {
+  const role = String(value || 'user').trim().toLowerCase();
+  return ALLOWED_ROLES.includes(role) ? role : 'user';
+}
+
+function normalizeStatus(value) {
+  return String(value || '').replace(/[\u00a0\s_-]+/g, '').toLowerCase();
+}
+
+function hashPassword(password) {
+  const digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(password || ''),
+    Utilities.Charset.UTF_8
+  );
+  return 'sha256:' + digest.map(byte => {
+    const value = byte < 0 ? byte + 256 : byte;
+    return ('0' + value.toString(16)).slice(-2);
+  }).join('');
+}
+
+function passwordMatches(suppliedPassword, storedPassword) {
+  const supplied = String(suppliedPassword || '').trim();
+  const stored = String(storedPassword || '').trim();
+  if (!stored) return false;
+  if (stored.toLowerCase().startsWith('sha256:')) {
+    return hashPassword(supplied) === stored.toLowerCase();
+  }
+  return supplied.toUpperCase() === stored.toUpperCase();
+}
+
+function getUserSheetContext() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+  const values = sheet.getDataRange().getDisplayValues();
+  if (!values.length) return { sheet: sheet, rows: [], headers: [] };
+  return {
+    sheet: sheet,
+    rows: values,
+    headers: values[0].map(header => String(header).toLowerCase().trim())
+  };
+}
+
+function findHeaderIndex(headers, aliases) {
+  return headers.findIndex(header => aliases.includes(header));
+}
+
+function findHeaderIndexFlexible(headers, aliases) {
+  const exactIndex = findHeaderIndex(headers, aliases);
+  if (exactIndex !== -1) return exactIndex;
+  return headers.findIndex(header => aliases.some(alias => header.includes(alias)));
+}
+
+function findRoleHeaderIndex(headers) {
+  const exactIndex = findHeaderIndex(headers, ['role', 'user role', 'userrole', 'hak akses', 'level role', 'access role']);
+  if (exactIndex !== -1) return exactIndex;
+  return headers.findIndex(header => header.includes('role') || header.includes('hak akses')); 
+}
+
+function findUserStatusHeaderIndex(headers) {
+  const exactIndex = findHeaderIndex(headers, ['status']);
+  if (exactIndex !== -1) return exactIndex;
+  return headers.findIndex(header => header.includes('status') && !header.includes('karyawan'));
+}
+
+function findUserNrpHeaderIndex(headers) {
+  const exactIndex = findHeaderIndex(headers, ['nrp', 'nik', 'id', 'user id']);
+  if (exactIndex !== -1) return exactIndex;
+  return headers.findIndex(header => header.includes('nrp') || header.includes('nik') || header.includes('user id'));
+}
+
+function findPasswordHeaderIndex(headers) {
+  const exactIndex = findHeaderIndex(headers, ['password', 'pass', 'kata sandi']);
+  if (exactIndex !== -1) return exactIndex;
+  return headers.findIndex(header => header.includes('password') || header.includes('kata sandi'));
+}
+
+function findUserByNrp(nrp) {
+  const context = getUserSheetContext();
+  const nrpIndex = findUserNrpHeaderIndex(context.headers);
+  if (nrpIndex === -1) return null;
+
+  const roleIndex = findRoleHeaderIndex(context.headers);
+  const statusIndex = findUserStatusHeaderIndex(context.headers);
+  const passwordIndex = findPasswordHeaderIndex(context.headers);
+  const normalized = normalizeNrp(nrp);
+  for (let rowIndex = 1; rowIndex < context.rows.length; rowIndex++) {
+    const row = context.rows[rowIndex];
+    if (normalizeNrp(row[nrpIndex]) !== normalized) continue;
+    return {
+      nrp: String(row[nrpIndex] || '').trim(),
+      nama: String(row[findHeaderIndexFlexible(context.headers, ['nama', 'name', 'karyawan', 'employee'])] || '').trim(),
+      role: normalizeRole(roleIndex === -1 ? 'user' : row[roleIndex]),
+      status: statusIndex === -1 ? 'active' : normalizeStatus(row[statusIndex]),
+      password: passwordIndex === -1 ? '' : String(row[passwordIndex] || '').trim(),
+      rowIndex: rowIndex + 1
+    };
+  }
+  return null;
+}
+
+function authenticateUser(nrp, password) {
+  const user = findUserByNrp(nrp);
+  if (!user) {
+    throw new Error('NRP tidak ditemukan pada sheet user.');
+  }
+  if (!['active', 'aktif'].includes(user.status)) {
+    throw new Error('Akun tidak aktif. Status user harus Active.');
+  }
+  if (!String(password || '').trim()) {
+    throw new Error('Password wajib diisi.');
+  }
+
+  // Isi kolom Password untuk mengganti password default NRP.
+  const suppliedPassword = String(password || '').trim();
+  const matchesExplicitPassword = passwordMatches(suppliedPassword, user.password);
+  const matchesDefaultNrp = !user.password && normalizeNrp(suppliedPassword) === normalizeNrp(user.nrp);
+  if (!matchesExplicitPassword && !matchesDefaultNrp) {
+    throw new Error('Password salah. Password default adalah NRP.');
+  }
+
+  const token = createSessionToken(user);
+  return { success: true, sessionToken: token, token: token, nrp: user.nrp, nama: user.nama, role: user.role };
+}
+
+function changePassword(payload) {
+  try {
+    const session = requireSession(payload && payload.sessionToken, ['user', 'admin', 'administrator']);
+    const currentPassword = String(payload.currentPassword || '').trim();
+    const newPassword = String(payload.newPassword || '').trim();
+    if (!currentPassword || newPassword.length < 6) {
+      return { success: false, error: 'Password lama wajib diisi dan password baru minimal 6 karakter.' };
+    }
+
+    const user = findUserByNrp(session.nrp);
+    const validCurrentPassword = user.password
+      ? passwordMatches(currentPassword, user.password)
+      : normalizeNrp(currentPassword) === normalizeNrp(user.nrp);
+    if (!validCurrentPassword) return { success: false, error: 'Password lama tidak valid.' };
+
+    const context = getUserSheetContext();
+    let passwordIndex = findHeaderIndex(context.headers, ['password', 'pass', 'kata sandi']);
+    if (passwordIndex === -1) {
+      passwordIndex = context.headers.length;
+      context.sheet.getRange(1, passwordIndex + 1).setValue('Password');
+    }
+    context.sheet.getRange(user.rowIndex, passwordIndex + 1).setValue(hashPassword(newPassword));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+function resetPasswordsBatch(payload) {
+  try {
+    requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
+    const nrpList = Array.isArray(payload.nrpList) ? payload.nrpList : [];
+    if (!nrpList.length) return { success: false, error: 'Tidak ada akun yang dipilih.' };
+
+    const context = getUserSheetContext();
+    const nrpIndex = findUserNrpHeaderIndex(context.headers);
+    if (nrpIndex === -1) return { success: false, error: 'Header NRP tidak ditemukan pada sheet user.' };
+
+    let passwordIndex = findPasswordHeaderIndex(context.headers);
+    if (passwordIndex === -1) {
+      passwordIndex = context.headers.length;
+      context.sheet.getRange(1, passwordIndex + 1).setValue('Password');
+    }
+
+    const selectedNrps = new Set(nrpList.map(normalizeNrp).filter(Boolean));
+    let count = 0;
+    for (let rowIndex = 1; rowIndex < context.rows.length; rowIndex++) {
+      const sheetNrp = String(context.rows[rowIndex][nrpIndex] || '').trim();
+      if (!selectedNrps.has(normalizeNrp(sheetNrp))) continue;
+      context.sheet.getRange(rowIndex + 1, passwordIndex + 1)
+        .setNumberFormat('@')
+        .setValue(hashPassword(sheetNrp));
+      count++;
+    }
+    return { success: true, count: count };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+function migratePlaintextPasswordsToHash() {
+  const context = getUserSheetContext();
+  const passwordIndex = findPasswordHeaderIndex(context.headers);
+  if (passwordIndex === -1) {
+    return { success: false, error: 'Header Password tidak ditemukan pada sheet user.' };
+  }
+
+  let count = 0;
+  for (let rowIndex = 1; rowIndex < context.rows.length; rowIndex++) {
+    const currentPassword = String(context.rows[rowIndex][passwordIndex] || '').trim();
+    if (!currentPassword || currentPassword.toLowerCase().startsWith('sha256:')) continue;
+    context.sheet.getRange(rowIndex + 1, passwordIndex + 1)
+      .setNumberFormat('@')
+      .setValue(hashPassword(currentPassword));
+    count++;
+  }
+  return { success: true, migrated: count };
+}
+
+function requireSession(token, allowedRoles) {
+  if (!token) throw new Error('Sesi tidak ditemukan. Silakan login kembali.');
+  const parts = String(token).split('.');
+  if (parts.length !== 2) throw new Error('Sesi tidak valid. Silakan login kembali.');
+
+  const expectedSignature = Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(parts[0], getSessionSecret())
+  );
+  if (parts[1] !== expectedSignature) throw new Error('Sesi tidak valid. Silakan login kembali.');
+
+  let session;
+  try {
+    session = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
+  } catch (error) {
+    throw new Error('Sesi tidak valid. Silakan login kembali.');
+  }
+  if (!session.expiresAt || Date.now() > session.expiresAt) {
+    throw new Error('Sesi kedaluwarsa. Silakan login kembali.');
+  }
+
+  const currentUser = findUserByNrp(session.nrp);
+  if (!currentUser) throw new Error('Akun tidak ditemukan. Silakan login kembali.');
+  session.role = currentUser.role;
+  session.nama = currentUser.nama;
+  if (allowedRoles && !allowedRoles.includes(session.role)) {
+    throw new Error('Anda tidak memiliki izin untuk melakukan operasi ini.');
+  }
+  return session;
+}
 
 /**
  * Normalisasi NRP untuk menghilangkan leading zeros saat pencocokan angka/string.
@@ -51,6 +311,27 @@ function mapUserValuesToManpowerHeaders(manpowerHeaders, values) {
   return mapped;
 }
 
+function getRecordValueByAliases(record, aliases) {
+  if (!record) return '';
+  const key = Object.keys(record).find(name => aliases.includes(String(name).toLowerCase().trim()));
+  return key ? String(record[key] || '').trim() : '';
+}
+
+function findCreatedColumn(headers) {
+  return headers.findIndex(header => {
+    const normalized = String(header).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    return normalized === 'created' || normalized === 'created at' || normalized === 'created date' || normalized === 'tanggal created' || normalized === 'tanggal dibuat';
+  });
+}
+
+function writeCreatedTimestamp(sheet, row, headers) {
+  const createdColumn = findCreatedColumn(headers);
+  if (createdColumn === -1) return;
+  sheet.getRange(row, createdColumn + 1)
+    .setNumberFormat('yyyy-mm-dd hh:mm:ss')
+    .setValue(new Date());
+}
+
 function getManpowerUserValues(headers, item) {
   return mapUserValuesToManpowerHeaders(headers, {
     NRP: formatTextValue(item.nrp),
@@ -59,7 +340,7 @@ function getManpowerUserValues(headers, item) {
     'KATEGORI AKUN': item.category || '',
     'LEVEL KARYAWAN': item.jobrank || '',
     'GOLONGAN KARYAWAN': item.jobgroup || '',
-    'STATUS KARYAWAN': item.status || '',
+    'STATUS KARYAWAN': item.manpowerStatus || item.status || '',
     'SUB SECTION / SECTION': item.subsection || ''
   });
 }
@@ -152,8 +433,7 @@ function getManpowerDataFast() {
 
       if (!currentNrp && !currentNama) continue;
 
-      let assignedRole = String(roleIdx !== -1 ? r[roleIdx] : 'user').toLowerCase().trim();
-      if (!assignedRole) assignedRole = 'user';
+      let assignedRole = normalizeRole(roleIdx !== -1 ? r[roleIdx] : 'user');
 
       let dbRecord = dbMap.get(currentNrp) || dbMap.get(normalizeNrp(currentNrp)) || {};
 
@@ -176,6 +456,7 @@ function getManpowerDataFast() {
         subsection: String(subSecIdx !== -1 ? r[subSecIdx] : '').trim(),
         custodian: String(custIdx !== -1 ? r[custIdx] : '').trim(),
         status: String(statIdx !== -1 ? r[statIdx] : 'ACTIVE').trim(),
+        manpowerStatus: getRecordValueByAliases(dbRecord, ['status karyawan']),
         perusahaan: sheetPerusahaan,
         category: String(catIdx !== -1 ? r[catIdx] : '').trim(),
         role: assignedRole,
@@ -194,7 +475,12 @@ function getManpowerDataFast() {
  * Fungsi khusus untuk melakukan sinkronisasi binding dari sheet 'user' ke 'db_MP' 
  * hanya ketika tombol Synchronize ditekan secara manual.
  */
-function executeManualSync() {
+function executeManualSync(payload) {
+  requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
+  return executeManualSyncInternal();
+}
+
+function executeManualSyncInternal() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
@@ -255,6 +541,8 @@ function executeManualSync() {
       let syncValues = mapUserValuesToManpowerHeaders(rawDbHeaders, {
         NRP: formattedNrp,
         NAMA: currentNama,
+        PERUSAHAAN: compIdx !== -1 ? String(r[compIdx] || '').trim() : '',
+        'SUB SECTION / SECTION': subSecIdx !== -1 ? String(r[subSecIdx] || '').trim() : '',
         'KATEGORI AKUN': catIdx !== -1 ? String(r[catIdx] || '').trim() : '',
         'LEVEL KARYAWAN': jrIdx !== -1 ? String(r[jrIdx] || '').trim() : '',
         'GOLONGAN KARYAWAN': jgIdx !== -1 ? String(r[jgIdx] || '').trim() : '',
@@ -295,10 +583,18 @@ function executeManualSync() {
 
 function createNewManpower(payload) {
   try {
+    requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
     const item = payload.item;
     const dbUpdates = payload.dbUpdates || {};
+
+    if (!item || !String(item.nrp || '').trim() || !String(item.nama || '').trim()) {
+      return { success: false, error: 'NRP dan nama wajib diisi.' };
+    }
+    item.role = 'user';
+    delete dbUpdates.role;
+    delete dbUpdates.Role;
 
     const rows = sheet.getDataRange().getDisplayValues();
     const headers = rows[0].map(h => String(h).toLowerCase().trim());
@@ -384,6 +680,7 @@ function createNewManpower(payload) {
 
     const lastDbRow = dbSheet.getLastRow();
     dbSheet.getRange(lastDbRow, dbNrpColIdx + 1).setNumberFormat('@').setValue(formattedNrp);
+    writeCreatedTimestamp(dbSheet, lastDbRow, dbHeaders);
 
     return { success: true };
   } catch (err) {
@@ -393,9 +690,20 @@ function createNewManpower(payload) {
 
 function updateSingleManpower(payload) {
   try {
+    const session = requireSession(payload && payload.sessionToken, ['user', 'admin', 'administrator']);
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const item = payload.item;
     let dbUpdates = payload.dbUpdates || {};
+
+    if (!item || !String(item.nrp || '').trim() || !String(item.nama || '').trim()) {
+      return { success: false, error: 'NRP dan nama wajib diisi.' };
+    }
+    if (session.role === 'user' && normalizeNrp(session.nrp) !== normalizeNrp(item.nrp)) {
+      throw new Error('User hanya dapat mengubah data dirinya sendiri.');
+    }
+    delete item.role;
+    delete dbUpdates.role;
+    delete dbUpdates.Role;
 
     delete dbUpdates['Superior'];
     delete dbUpdates['superior'];
@@ -461,7 +769,6 @@ function updateSingleManpower(payload) {
       if (statIdx !== -1) sheet.getRange(targetRow, statIdx + 1).setValue(item.status);
       if (compIdx !== -1) sheet.getRange(targetRow, compIdx + 1).setValue(item.perusahaan);
       if (catIdx !== -1) sheet.getRange(targetRow, catIdx + 1).setValue(item.category);
-      if (roleIdx !== -1) sheet.getRange(targetRow, roleIdx + 1).setValue(item.role);
     }
 
     let dbSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
@@ -511,7 +818,8 @@ function updateSingleManpower(payload) {
       }
     }
 
-    let finalRecordValues = { ...dbUpdates, ...getManpowerUserValues(dbHeaders, item) };
+    // dbUpdates harus di-spread TERAKHIR agar nilai dari form override nilai dari sheet user
+    let finalRecordValues = { ...getManpowerUserValues(dbHeaders, item), ...dbUpdates };
 
     if (targetDbRow !== -1) {
       dbHeaders.forEach((colName, colIdx) => {
@@ -525,6 +833,7 @@ function updateSingleManpower(payload) {
           }
         }
       });
+      writeCreatedTimestamp(dbSheet, targetDbRow, dbHeaders);
     } else {
       let newRowArr = dbHeaders.map((colName, colIdx) => {
         if (colIdx === dbNrpColIdx) return formattedNrp;
@@ -535,6 +844,7 @@ function updateSingleManpower(payload) {
       dbSheet.appendRow(newRowArr);
       const lastDbRow = dbSheet.getLastRow();
       dbSheet.getRange(lastDbRow, dbNrpColIdx + 1).setNumberFormat('@').setValue(formattedNrp);
+      writeCreatedTimestamp(dbSheet, lastDbRow, dbHeaders);
     }
 
     return { success: true };
@@ -543,8 +853,11 @@ function updateSingleManpower(payload) {
   }
 }
 
-function updateRolesBatch(nrpList, newRole) {
+function updateRolesBatch(payload) {
   try {
+    requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
+    const nrpList = payload.nrpList || [];
+    const newRole = normalizeRole(payload.newRole);
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
     const rows = sheet.getDataRange().getValues();
@@ -576,8 +889,10 @@ function updateRolesBatch(nrpList, newRole) {
   }
 }
 
-function deleteManpowerRows(nrpList) {
+function deleteManpowerRows(payload) {
   try {
+    requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
+    const nrpList = payload.nrpList || [];
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let mainSheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
     const rows = mainSheet.getDataRange().getValues();
