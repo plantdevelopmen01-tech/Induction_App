@@ -1,108 +1,1984 @@
-function runBackgroundSync() {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    let dbSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
-    
-    if (!dbSheet) {
-      dbSheet = ss.insertSheet(DB_MP_SHEET_NAME);
-      dbSheet.appendRow(["NRP", "Nama"]);
-    }
-
-    const rows = sheet.getDataRange().getDisplayValues();
-    if (!rows || rows.length <= 1) return { success: true };
-
-    const headers = rows[0].map(h => String(h).toLowerCase().trim());
-    const findCol = (keywords) => headers.findIndex(h => keywords.some(kw => h.includes(kw)));
-    
-    const actualNrpIdx = findCol(['nrp', 'nik', 'id', 'user id']) !== -1 ? findCol(['nrp', 'nik', 'id', 'user id']) : 0;
-    const actualNamaIdx = findCol(['nama', 'name', 'karyawan', 'employee']) !== -1 ? findCol(['nama', 'name', 'karyawan', 'employee']) : 1;
-    const secIdx = headers.findIndex(h => h.includes('section') && !h.includes('sub'));
-    const subSecIdx = findCol(['sub section', 'subsection', 'sub']);
-
-    const dbRows = dbSheet.getDataRange().getDisplayValues();
-    let dbHeaders = dbRows.length > 0 ? dbRows[0].map(h => String(h).trim()) : ["NRP", "Nama"];
-    let dbNrpIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'nrp' || h.toLowerCase() === 'nik' || h.toLowerCase() === 'id');
-    let dbNamaIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'nama' || h.toLowerCase() === 'name');
-    
-    if (dbNrpIdx === -1) { dbNrpIdx = 0; }
-    if (dbNamaIdx === -1) { dbNamaIdx = 1; }
-
-    // Pastikan kolom Section dan Superior otomatis ada di header db_MP
-    ['Section', 'Superior'].forEach(targetCol => {
-      let idx = dbHeaders.findIndex(h => h.toLowerCase() === targetCol.toLowerCase());
-      if (idx === -1) {
-        dbSheet.getRange(1, dbHeaders.length + 1).setValue(targetCol);
-        dbHeaders.push(targetCol);
-      }
-    });
-
-    // Ambil ulang header dan data db_MP terbaru setelah penambahan kolom
-    dbRows = dbSheet.getDataRange().getDisplayValues();
-    dbHeaders = dbRows[0].map(h => String(h).trim());
-    let dbSecIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'section');
-    let dbSupIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'superior');
-
-    let dbMap = new Map();
-    for (let j = 1; j < dbRows.length; j++) {
-      let rNrp = String(dbRows[j][dbNrpIdx] || '').trim();
-      if (rNrp) dbMap.set(rNrp, j + 1);
-    }
-
-    for (let i = 1; i < rows.length; i++) {
-      let uNrp = String(rows[i][actualNrpIdx] || '').trim();
-      let uNama = String(rows[i][actualNamaIdx] || '').trim();
-      let uSection = secIdx !== -1 ? String(rows[i][secIdx] || '').trim() : '';
-      let uSubSection = subSecIdx !== -1 ? String(rows[i][subSecIdx] || '').trim() : '';
-      
-      if (!uNrp) continue;
-
-      if (dbMap.has(uNrp)) {
-        let targetDbRow = dbMap.get(uNrp);
+<!DOCTYPE html>
+<html lang="id" class="h-full dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manpower Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    },
+                    colors: {
+                        cyber: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#06b6d4',
+                            600: '#0891b2',
+                            900: '#0f172a',
+                            950: '#030712'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+        ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.25); border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.5); }
         
-        // Sync Nama jika berubah
-        let currentDbNama = String(dbSheet.getRange(targetDbRow, dbNamaIdx + 1).getValue()).trim();
-        if (currentDbNama !== uNama && uNama) {
-          dbSheet.getRange(targetDbRow, dbNamaIdx + 1).setValue(uNama);
-        }
+        .glow-cyan { box-shadow: 0 0 20px -3px rgba(6, 182, 212, 0.35); }
+        .glow-indigo { box-shadow: 0 0 20px -3px rgba(99, 102, 241, 0.35); }
+        .cyber-border-glow { border: 1px solid rgba(56, 189, 248, 0.2); }
+        .cyber-border-glow:focus-within { border-color: rgba(6, 182, 212, 0.6); box-shadow: 0 0 15px -2px rgba(6, 182, 212, 0.3); }
 
-        // Paksa update Section di db_MP agar selalu sinkron dengan Section dari sheet user
-        if (dbSecIdx !== -1) {
-          dbSheet.getRange(targetDbRow, dbSecIdx + 1).setValue(uSection);
-        }
+        .dark input[type="date"] { color-scheme: dark; }
+        .dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
+    </style>
+</head>
+<body class="h-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans antialiased overflow-hidden transition-colors duration-200" onclick="closeAllDropdowns(event)">
 
-        // Paksa update Superior di db_MP agar selalu sinkron dengan Sub Section dari sheet user
-        if (dbSupIdx !== -1) {
-          dbSheet.getRange(targetDbRow, dbSupIdx + 1).setValue(uSubSection);
-        }
-      } else {
-        // Jika NRP belum ada di db_MP, buat baris baru beserta datanya
-        let newRow = new Array(dbHeaders.length).fill('');
-        newRow[dbNrpIdx] = uNrp;
-        newRow[dbNamaIdx] = uNama;
-        if (dbSecIdx !== -1) newRow[dbSecIdx] = uSection;
-        if (dbSupIdx !== -1) newRow[dbSupIdx] = uSubSection;
+    <div id="app" class="h-full flex flex-col overflow-hidden">
         
-        dbSheet.appendRow(newRow);
-        dbMap.set(uNrp, dbSheet.getLastRow());
-      }
-    }
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.toString() };
-  }
-}
+        <!-- Global Animated Loading Screen -->
+        <div id="global-loader" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xl flex flex-col items-center justify-center text-white px-4 transition-opacity duration-300">
+            <div class="relative flex items-center justify-center mb-6">
+                <div class="absolute inset-0 rounded-full bg-cyan-500/20 blur-xl animate-pulse"></div>
+                <div class="inline-block animate-spin rounded-full h-14 w-14 border-4 border-cyan-500 border-t-transparent shadow-lg"></div>
+                <i class="fa-solid fa-atom absolute text-cyan-400 text-lg animate-ping"></i>
+            </div>
+            <p id="loader-text" class="text-base font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 mb-3">Menghubungkan ke server...</p>
+            <div class="w-72 bg-slate-900/80 h-2.5 rounded-full overflow-hidden border border-slate-800 p-0.5 shadow-inner">
+                <div id="loader-progress-bar" class="bg-gradient-to-r from-cyan-500 via-indigo-500 to-blue-500 h-full w-0 rounded-full transition-all duration-300 shadow-sm"></div>
+            </div>
+            <p id="loader-percent" class="text-xs text-cyan-400 mt-2.5 font-mono tracking-widest">0%</p>
+        </div>
 
-function createTimeDrivenTriggers() {
-  var triggers = ScriptApp.getProjectTriggers();
-  for (var i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === 'runBackgroundSync') {
-      ScriptApp.deleteTrigger(triggers[i]);
-    }
-  }
+        <!-- Login View -->
+        <div id="login-view" class="hidden flex-1 flex items-center justify-center p-4 bg-slate-100 dark:bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] dark:from-slate-900 dark:via-slate-950 dark:to-black">
+            <div class="max-w-md w-full bg-white dark:bg-slate-900/80 backdrop-blur-2xl rounded-3xl shadow-[0_0_50px_rgba(8,145,178,0.15)] border border-slate-200 dark:border-cyan-500/20 p-8 text-slate-800 dark:text-white relative overflow-hidden">
+                <div class="absolute -top-24 -right-24 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute -bottom-24 -left-24 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
-  ScriptApp.newTrigger('runBackgroundSync')
-    .timeBased()
-    .everyHours(1) 
-    .create();
-}
+                <div class="text-center mb-8 relative z-10">
+                    <div class="inline-flex p-4 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-2xl shadow-lg shadow-cyan-500/20 mb-4 text-2xl text-white">
+                        <i class="fa-solid fa-users-gear"></i>
+                    </div>
+                    <h1 class="text-2xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-900 dark:from-white via-slate-700 dark:via-slate-200 to-cyan-500">MP PORTAL SYSTEM</h1>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-2 font-medium">Silakan masuk menggunakan NRP & Password terverifikasi</p>
+                </div>
+
+                <form id="login-form" class="space-y-5 relative z-10" onsubmit="handleLogin(event)">
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase tracking-widest text-cyan-600 dark:text-cyan-400/90 mb-2">NRP</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400"><i class="fa-solid fa-id-badge text-xs"></i></span>
+                            <input type="text" id="login-nrp" required placeholder="Masukkan NRP Anda..." oninput="this.value = this.value.toUpperCase()" class="uppercase w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-xs tracking-wide transition">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase tracking-widest text-cyan-600 dark:text-cyan-400/90 mb-2">Password</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400"><i class="fa-solid fa-lock text-xs"></i></span>
+                            <input type="password" id="login-password" required placeholder="Password default (NRP)..." class="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-xs tracking-wide transition">
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full py-3.5 px-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-cyan-600/25 transition text-xs tracking-wider uppercase">
+                        Masuk System Portal
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Main Application Layout -->
+        <div id="main-layout" class="hidden flex-1 flex h-full overflow-hidden bg-slate-100 dark:bg-slate-950">
+            <!-- Sidebar -->
+            <aside id="app-sidebar" class="w-64 bg-white dark:bg-slate-900/90 backdrop-blur-md text-slate-700 dark:text-slate-300 flex flex-col border-r border-slate-200 dark:border-slate-800/80 transition-all duration-300 z-30 shrink-0 h-full">
+                <div class="h-16 px-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800/80 shrink-0">
+                    <div id="sidebar-brand" class="flex items-center space-x-3 overflow-hidden">
+                        <div class="p-2 bg-gradient-to-tr from-cyan-600 to-blue-600 text-white rounded-xl shadow-md shrink-0"><i class="fa-solid fa-users-rectangle"></i></div>
+                        <span class="font-extrabold text-base tracking-wider truncate sidebar-label bg-clip-text text-transparent bg-gradient-to-r from-slate-900 dark:from-white to-slate-600 dark:to-slate-300">MP SYSTEM</span>
+                    </div>
+                </div>
+
+                <nav class="flex-1 px-3 py-6 space-y-2 overflow-y-auto">
+                    <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-xs font-semibold transition text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 border border-cyan-500/20"><i class="fa-solid fa-chart-pie w-6 text-center text-sm shrink-0"></i><span class="sidebar-label truncate">Dashboard</span></button>
+                    <button onclick="switchTab('manpower')" id="nav-manpower" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-xs font-semibold transition text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/60"><i class="fa-solid fa-users w-6 text-center text-sm shrink-0"></i><span class="sidebar-label truncate">Manpower</span></button>
+                    <button onclick="switchTab('mcu')" id="nav-mcu" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-xs font-semibold transition text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/60"><i class="fa-solid fa-heart-pulse w-6 text-center text-sm shrink-0"></i><span class="sidebar-label truncate">MCU</span></button>
+                    <button onclick="switchTab('settings')" id="nav-settings" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-xs font-semibold transition text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/60"><i class="fa-solid fa-user-gear w-6 text-center text-sm shrink-0"></i><span class="sidebar-label truncate">User Role Settings</span></button>
+                </nav>
+
+                <div class="p-3 border-t border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/60 shrink-0">
+                    <div id="sidebar-footer-profile" class="flex items-center space-x-3">
+                        <div class="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-bold flex items-center justify-center shrink-0 border border-cyan-500/20"><i class="fa-solid fa-user text-xs"></i></div>
+                        <div class="overflow-hidden sidebar-label flex-1">
+                            <p id="user-display-name" class="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">-</p>
+                            <p id="user-display-role" class="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold uppercase tracking-wider truncate">-</p>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <div class="flex-1 flex flex-col h-full overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100">
+                <header class="bg-white dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 h-16 flex items-center justify-between px-6 z-20 shrink-0">
+                    <div class="flex items-center space-x-4">
+                        <button onclick="toggleSidebar()" class="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"><i class="fa-solid fa-bars-staggered text-base"></i></button>
+                        <h1 id="current-page-title" class="font-bold text-base text-slate-900 dark:text-white tracking-wide">Dashboard Overview</h1>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <div id="bg-sync-indicator" class="hidden items-center space-x-2 px-3 py-1.5 bg-slate-200 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700/80 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300">
+                            <i id="bg-sync-icon" class="fa-solid fa-rotate animate-spin text-cyan-500"></i>
+                            <span id="bg-sync-text">Synchronizing...</span>
+                        </div>
+                        <button id="btn-theme-toggle" onclick="toggleTheme()" class="px-3.5 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700/80 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-semibold rounded-xl text-xs transition flex items-center space-x-2 shadow-sm" title="Ganti Tema">
+                            <i id="theme-btn-icon" class="fa-solid fa-moon text-cyan-400"></i>
+                            <span id="theme-btn-text">Gelap</span>
+                        </button>
+                        <button id="btn-sync-data" onclick="loadSpreadsheetData(true)" class="px-3.5 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700/80 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-semibold rounded-xl text-xs transition flex items-center space-x-2 shadow-sm">
+                            <i class="fa-solid fa-rotate text-xs"></i>
+                            <span id="btn-sync-text">Synchronize</span>
+                        </button>
+                        <button onclick="logout()" class="p-2 text-slate-400 hover:text-rose-500 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-800 transition" title="Keluar"><i class="fa-solid fa-right-from-bracket text-base"></i></button>
+                    </div>
+                </header>
+
+                <main class="flex-1 overflow-hidden p-3 sm:p-5 lg:p-6 flex flex-col bg-slate-100 dark:bg-slate-950">
+                    <!-- Dashboard View -->
+                    <section id="view-dashboard" class="tab-content flex-1 flex flex-col space-y-4 overflow-y-auto pr-1">
+                        <div class="bg-white dark:bg-slate-900/60 backdrop-blur-md p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 shrink-0 shadow-xs">
+                            <div id="filter-dash-container-comp" class="relative"></div>
+                            <div id="filter-dash-container-dept" class="relative"></div>
+                            <div id="filter-dash-container-sec" class="relative"></div>
+                            <div id="filter-dash-container-jg" class="relative"></div>
+                            <div id="filter-dash-container-stat" class="relative"></div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+                            <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-between shadow-xs"><div><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Manpower</p><h3 id="stat-total-mp" class="text-xl font-black text-slate-900 dark:text-white mt-0.5">0</h3></div><div class="p-2.5 bg-cyan-500/10 text-cyan-500 dark:text-cyan-400 border border-cyan-500/20 rounded-xl text-base"><i class="fa-solid fa-users"></i></div></div>
+                            <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-between shadow-xs"><div><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Perusahaan</p><h3 id="stat-total-company" class="text-xl font-black text-slate-900 dark:text-white mt-0.5">0</h3></div><div class="p-2.5 bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 border border-indigo-500/20 rounded-xl text-base"><i class="fa-solid fa-building"></i></div></div>
+                            <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-between shadow-xs"><div><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Departemen</p><h3 id="stat-total-dept" class="text-xl font-black text-slate-900 dark:text-white mt-0.5">0</h3></div><div class="p-2.5 bg-violet-500/10 text-violet-500 dark:text-violet-400 border border-violet-500/20 rounded-xl text-base"><i class="fa-solid fa-building-user"></i></div></div>
+                            <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-between shadow-xs"><div><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Section</p><h3 id="stat-total-section" class="text-xl font-black text-slate-900 dark:text-white mt-0.5">0</h3></div><div class="p-2.5 bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 rounded-xl text-base"><i class="fa-solid fa-sitemap"></i></div></div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 shrink-0 pb-2">
+                            <div class="bg-white dark:bg-slate-900/80 p-5 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-xs"><h3 class="text-xs font-bold text-slate-900 dark:text-white mb-3 flex items-center justify-between"><span><i class="fa-solid fa-chart-bar text-cyan-500 dark:text-cyan-400 mr-2"></i> Distribusi Perusahaan</span><span id="count-comp-chart" class="text-xs font-medium text-slate-400">0 data</span></h3><div id="company-distribution" class="space-y-2.5 max-h-72 overflow-y-auto pr-1"></div></div>
+                            <div class="bg-white dark:bg-slate-900/80 p-5 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-xs"><h3 class="text-xs font-bold text-slate-900 dark:text-white mb-3 flex items-center justify-between"><span><i class="fa-solid fa-layer-group text-indigo-500 dark:text-indigo-400 mr-2"></i> Distribusi Job Group</span><span id="count-jg-chart" class="text-xs font-medium text-slate-400">0 data</span></h3><div id="jobgroup-distribution" class="space-y-2.5 max-h-72 overflow-y-auto pr-1"></div></div>
+                        </div>
+                    </section>
+
+                    <!-- Manpower View -->
+                    <section id="view-manpower" class="tab-content hidden flex-1 flex flex-col space-y-3 overflow-hidden">
+                        <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 grid grid-cols-1 md:grid-cols-4 gap-3 shrink-0 shadow-xs">
+                            <div id="filter-container-comp" class="relative"></div>
+                            <div id="filter-container-sec" class="relative"></div>
+                            <div id="filter-container-stat" class="relative"></div>
+                            <div class="flex items-center space-x-2">
+                                <div class="relative flex-1">
+                                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400"><i class="fa-solid fa-search text-xs"></i></span>
+                                    <input type="text" id="search-mp" oninput="mpPage=1; this.value = this.value.toUpperCase(); renderManpowerTable()" placeholder="Cari global..." class="uppercase w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500">
+                                </div>
+                                <button onclick="openAddModal()" class="px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-md transition shrink-0 flex items-center space-x-1.5" title="Tambah Manpower Baru">
+                                    <i class="fa-solid fa-plus text-xs"></i>
+                                    <span>Tambah</span>
+                                </button>
+                                <button onclick="deleteSelectedManpower()" id="delete-mp-btn" disabled class="px-3 py-2 bg-rose-600/80 hover:bg-rose-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 text-white font-medium rounded-xl text-xs shadow-xs transition shrink-0" title="Hapus Terpilih"><i class="fa-solid fa-trash-can"></i></button>
+                            </div>
+                        </div>
+
+                        <div class="bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex-1 flex flex-col overflow-hidden shadow-xs">
+                            <div class="flex-1 overflow-auto">
+                                <table class="w-full text-left border-collapse table-fixed">
+                                    <thead>
+                                        <tr class="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800/80 text-[10px] font-bold uppercase tracking-wider">
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-10 text-center"><input type="checkbox" id="select-all-mp" onclick="toggleSelectAllManpower(this)" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-500 w-3.5 h-3.5"></th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-16 text-center">Aksi</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-24 text-center">NRP</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-44 text-center">Nama</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-40 text-center">Position</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-36 text-center">Section</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-32 text-center">Job Group</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-36 text-center">Departemen</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-24 text-center">Status</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-40 text-center">Perusahaan</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-32 text-center">Role</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="manpower-table-body" class="divide-y divide-slate-200 dark:divide-slate-800/50 text-xs text-slate-700 dark:text-slate-300"></tbody>
+                                </table>
+                            </div>
+                            <div class="p-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60 text-xs text-slate-500 dark:text-slate-400 shrink-0">
+                                <span id="mp-pagination-status">Menampilkan 0 dari 0 data</span>
+                                <div id="mp-pagination-buttons" class="flex items-center space-x-1"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- MCU View -->
+                    <section id="view-mcu" class="tab-content hidden flex-1 flex flex-col space-y-4 overflow-hidden">
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
+                            <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-between shadow-xs">
+                                <div><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Karyawan MCU</p><h3 id="stat-mcu-total" class="text-xl font-black text-slate-900 dark:text-white mt-0.5">0</h3></div>
+                                <div class="p-2.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xl text-base"><i class="fa-solid fa-heart-pulse"></i></div>
+                            </div>
+                            <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-between shadow-xs">
+                                <div><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">MCU Valid / Tercatat</p><h3 id="stat-mcu-valid" class="text-xl font-black text-cyan-600 dark:text-cyan-400 mt-0.5">0</h3></div>
+                                <div class="p-2.5 bg-cyan-500/10 text-cyan-500 border border-cyan-500/20 rounded-xl text-base"><i class="fa-solid fa-calendar-check"></i></div>
+                            </div>
+                            <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-between shadow-xs">
+                                <div><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Belum Ada Jadwal MCU</p><h3 id="stat-mcu-missing" class="text-xl font-black text-rose-500 mt-0.5">0</h3></div>
+                                <div class="p-2.5 bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded-xl text-base"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-between gap-3 shrink-0 shadow-xs">
+                            <div class="relative flex-1">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400"><i class="fa-solid fa-search text-xs"></i></span>
+                                <input type="text" id="search-mcu" oninput="mcuPage=1; this.value = this.value.toUpperCase(); renderMcuTable()" placeholder="Cari data MCU / NRP / Nama..." class="uppercase w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500">
+                            </div>
+                        </div>
+
+                        <div class="bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex-1 flex flex-col overflow-hidden shadow-xs">
+                            <div class="flex-1 overflow-auto">
+                                <table class="w-full text-left border-collapse table-fixed">
+                                    <thead>
+                                        <tr class="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800/80 text-[10px] font-bold uppercase tracking-wider">
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-16 text-center">Aksi</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-24 text-center">NRP</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-44 text-center">Nama</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-40 text-center">Position</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-36 text-center">Section</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-40 text-center">Perusahaan</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-36 text-center">Tanggal Hasil MCU</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-32 text-center">Status MCU</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="mcu-table-body" class="divide-y divide-slate-200 dark:divide-slate-800/50 text-xs text-slate-700 dark:text-slate-300"></tbody>
+                                </table>
+                            </div>
+                            <div class="p-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60 text-xs text-slate-500 dark:text-slate-400 shrink-0">
+                                <span id="mcu-pagination-status">Menampilkan 0 dari 0 data</span>
+                                <div id="mcu-pagination-buttons" class="flex items-center space-x-1"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Settings View -->
+                    <section id="view-settings" class="tab-content hidden flex-1 flex flex-col space-y-3 overflow-hidden">
+                        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 shrink-0">
+                            <p class="text-xs text-slate-500 dark:text-slate-400">Kelola level hak akses (User, Admin, Administrator) langsung ke sheet user.</p>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button onclick="openBatchRoleModal()" id="batch-role-btn" disabled class="px-3.5 py-2 bg-cyan-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-semibold rounded-xl text-xs transition flex items-center space-x-1.5"><i class="fa-solid fa-user-pen text-[11px]"></i><span>Ubah Role</span></button>
+                                <div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-2.5 text-slate-400"><i class="fa-solid fa-search text-xs"></i></span><input type="text" id="search-settings" oninput="settingsPage=1; this.value = this.value.toUpperCase(); renderSettingsTable()" placeholder="Cari global..." class="uppercase pl-8 pr-3 py-2 bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-cyan-500 w-56"></div>
+                            </div>
+                        </div>
+                        <div class="bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800/80 flex-1 flex flex-col overflow-hidden shadow-xs">
+                            <div class="flex-1 overflow-auto">
+                                <table class="w-full text-left border-collapse table-fixed">
+                                    <thead>
+                                        <tr class="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800/80 text-[10px] font-bold uppercase tracking-wider">
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-10 text-center"><input type="checkbox" id="select-all-settings" onclick="toggleSelectAllSettings(this)" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-500 w-3.5 h-3.5"></th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-16 text-center">Aksi</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-24 text-center">NRP</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-44 text-center">Nama</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-40 text-center">Position</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-32 text-center">Job Group</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-36 text-center">Section</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-40 text-center">Perusahaan</th>
+                                            <th class="p-3 sticky top-0 bg-slate-50 dark:bg-slate-950 w-32 text-center">User Role</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="settings-table-body" class="divide-y divide-slate-200 dark:divide-slate-800/50 text-xs text-slate-700 dark:text-slate-300"></tbody>
+                                </table>
+                            </div>
+                            <div class="p-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60 text-xs text-slate-500 dark:text-slate-400 shrink-0">
+                                <span id="settings-pagination-status">Menampilkan 0 dari 0 data</span>
+                                <div id="settings-pagination-buttons" class="flex items-center space-x-1"></div>
+                            </div>
+                        </div>
+                    </section>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Modal -->
+    <div id="add-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-xl">
+        <div class="bg-white dark:bg-slate-900/95 rounded-3xl max-w-3xl w-full shadow-[0_0_60px_rgba(6,182,212,0.15)] border border-slate-200 dark:border-cyan-500/30 overflow-hidden flex flex-col max-h-[92vh] text-slate-800 dark:text-slate-100 relative">
+            <div class="absolute -top-32 -right-32 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute -bottom-32 -left-32 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="bg-slate-50 dark:bg-slate-900/90 px-6 py-4 border-b border-slate-200 dark:border-cyan-500/20 flex items-center justify-between z-10 shrink-0">
+                <div class="flex items-center space-x-3">
+                    <div class="p-2.5 bg-cyan-500/10 border border-cyan-500/30 rounded-2xl text-cyan-500 dark:text-cyan-400 glow-cyan">
+                        <i class="fa-solid fa-user-plus text-base"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <h3 class="text-base font-extrabold text-slate-900 dark:text-white tracking-wide">TAMBAH MANPOWER BARU</h3>
+                            <span class="px-2 py-0.5 bg-cyan-500/10 border border-cyan-500/30 rounded-full text-[9px] font-mono text-cyan-600 dark:text-cyan-300 uppercase tracking-widest">USER SHEET</span>
+                        </div>
+                        <p class="text-[11px] text-slate-500 dark:text-slate-400">Masukkan data karyawan sesuai struktur sheet User.</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button type="button" onclick="closeAddModal()" class="px-3.5 py-1.5 border border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-semibold rounded-xl text-xs transition">Batal</button>
+                    <button type="button" onclick="triggerSaveNewManpower()" class="px-4 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/20 transition flex items-center space-x-1.5">
+                        <i class="fa-solid fa-plus text-[11px]"></i>
+                        <span>Tambah Karyawan</span>
+                    </button>
+                    <button onclick="closeAddModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white p-1.5 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-800 transition ml-1"><i class="fa-solid fa-xmark text-base"></i></button>
+                </div>
+            </div>
+
+            <form id="add-manpower-form" onsubmit="saveNewManpower(event)" class="flex-1 overflow-y-auto p-5 space-y-4 text-xs z-10">
+                <div class="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-cyan-500/20 space-y-3 relative overflow-visible">
+                    <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-cyan-400 to-blue-500 rounded-l-2xl"></div>
+                    <h4 class="text-[11px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-300 pb-2 border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between">
+                        <span><i class="fa-solid fa-id-card text-cyan-500 mr-2"></i> Identitas & Kontak Utama</span>
+                        <span class="text-[9px] font-mono text-rose-500">* WAJIB DIISI</span>
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">NRP <span class="text-rose-500">*</span></label>
+                            <input type="text" id="add-nrp" required placeholder="MASUKKAN NRP..." oninput="this.value = this.value.toUpperCase()" class="uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-cyan-600 dark:text-cyan-300 focus:outline-none focus:border-cyan-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Nama Lengkap <span class="text-rose-500">*</span></label>
+                            <input type="text" id="add-nama" required placeholder="NAMA LENGKAP KARYAWAN..." oninput="this.value = this.value.toUpperCase()" class="uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 mb-1 flex items-center justify-between">
+                                <span>ALAMAT EMAIL (WAJIB DIISI)</span>
+                                <span class="text-[9px] font-normal italic text-slate-400">Automatic Lowercase Text</span>
+                            </label>
+                            <input type="email" id="add-email" placeholder="contoh@email.com" oninput="this.value = this.value.toLowerCase()" class="lowercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-medium text-cyan-600 dark:text-cyan-300 focus:outline-none focus:border-cyan-500">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-indigo-500/20 space-y-3 relative overflow-visible">
+                    <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-indigo-400 to-violet-500 rounded-l-2xl"></div>
+                    <h4 class="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-300 pb-2 border-b border-slate-200 dark:border-slate-800/80">
+                        <i class="fa-solid fa-sitemap text-indigo-500 mr-2"></i> Jabatan & Organisasi Karyawan
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Position</label>
+                            <div id="add-container-position"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Job Group</label>
+                            <div id="add-container-jobgroup"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Job Rank</label>
+                            <div id="add-container-jobrank"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Perusahaan</label>
+                            <div id="add-container-perusahaan"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Departemen</label>
+                            <div id="add-container-departemen"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Section</label>
+                            <div id="add-container-section"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Sub Section / Section</label>
+                            <div id="add-container-subsection"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Custodian / Leader</label>
+                            <div id="add-container-custodian"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Category</label>
+                            <div id="add-container-category"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Status Kepegawaian</label>
+                            <input type="text" id="add-status" value="ACTIVE" readonly class="uppercase w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed focus:outline-none" title="Terkunci: Otomatis terisi Active">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">User Role</label>
+                            <input type="text" id="add-role" value="USER" readonly class="uppercase w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed focus:outline-none" title="Terkunci: Otomatis terisi User">
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Role Modal -->
+    <div id="role-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+        <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-cyan-500/30 space-y-4 text-slate-800 dark:text-white">
+            <div class="flex items-center justify-between"><h3 class="text-base font-bold text-cyan-600 dark:text-cyan-400">Ubah Role Pengguna</h3><button onclick="closeRoleModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white p-1 rounded-lg"><i class="fa-solid fa-xmark text-lg"></i></button></div>
+            <p id="role-modal-desc" class="text-xs text-slate-500 dark:text-slate-400">Pilih level akses baru untuk pengguna yang dipilih.</p>
+            <div class="space-y-2">
+                <label class="block text-[10px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400/90">Level Role Baru</label>
+                <select id="target-role-select" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-cyan-500"><option value="user">User</option><option value="admin">Admin</option><option value="administrator">Administrator</option></select>
+            </div>
+            <div class="flex items-center justify-end space-x-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+                <button onclick="closeRoleModal()" class="px-4 py-2 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold rounded-xl text-xs">Batal</button>
+                <button onclick="executeBatchRoleUpdate()" class="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-md">Simpan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- View/Edit Modal -->
+    <div id="view-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-xl">
+        <div class="bg-white dark:bg-slate-900/95 rounded-3xl max-w-4xl w-full shadow-[0_0_60px_rgba(6,182,212,0.15)] border border-slate-200 dark:border-cyan-500/30 overflow-hidden flex flex-col max-h-[92vh] text-slate-800 dark:text-slate-100 relative">
+            
+            <div class="absolute -top-32 -right-32 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute -bottom-32 -left-32 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="bg-slate-50 dark:bg-slate-900/90 px-6 py-4 border-b border-slate-200 dark:border-cyan-500/20 flex items-center justify-between z-10 shrink-0">
+                <div class="flex items-center space-x-3">
+                    <div class="p-2.5 bg-cyan-500/10 border border-cyan-500/30 rounded-2xl text-cyan-500 dark:text-cyan-400 glow-cyan">
+                        <i class="fa-solid fa-id-card-clip text-base"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <h3 class="text-base font-extrabold text-slate-900 dark:text-white tracking-wide">DETAILS MANPOWER PORTAL</h3>
+                            <span class="px-2 py-0.5 bg-cyan-500/10 border border-cyan-500/30 rounded-full text-[9px] font-mono text-cyan-600 dark:text-cyan-300 uppercase tracking-widest">PRO-SYSTEM</span>
+                        </div>
+                        <p class="text-[11px] text-slate-500 dark:text-slate-400">Edit & perbarui data operasional dan relasi terstruktur.</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button type="button" onclick="closeViewModal()" class="px-3.5 py-1.5 border border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-semibold rounded-xl text-xs transition">Batal</button>
+                    <button type="button" onclick="triggerSaveManpower()" class="px-4 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/20 transition flex items-center space-x-1.5">
+                        <i class="fa-solid fa-floppy-disk text-[11px]"></i>
+                        <span>Simpan</span>
+                    </button>
+                    <button onclick="closeViewModal()" class="text-slate-400 hover:text-slate-800 dark:hover:text-white p-1.5 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-800 transition ml-1"><i class="fa-solid fa-xmark text-base"></i></button>
+                </div>
+            </div>
+            
+            <form id="edit-manpower-form" onsubmit="saveManpowerDetail(event)" class="flex-1 overflow-y-auto p-5 pb-40 space-y-4 text-xs z-10">
+                <input type="hidden" id="edit-row-idx">
+                
+                <div class="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-cyan-500/20 space-y-3 relative overflow-visible transition-all">
+                    <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-cyan-400 to-blue-500 rounded-l-2xl"></div>
+                    <h4 class="text-[11px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-300 flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800/80">
+                        <span class="flex items-center"><i class="fa-solid fa-user-astronaut text-cyan-500 dark:text-cyan-400 mr-2"></i> Informasi Utama Karyawan</span>
+                        <span class="text-[9px] font-mono text-slate-400 dark:text-slate-500">SECTION ID: 01</span>
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">NRP</label>
+                            <input type="text" id="edit-nrp" required oninput="this.value = this.value.toUpperCase()" class="uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-cyan-600 dark:text-cyan-300 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Nama Lengkap</label>
+                            <input type="text" id="edit-nama" required oninput="this.value = this.value.toUpperCase()" class="uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Position</label>
+                            <div id="container-position"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Job Group</label>
+                            <div id="container-jobgroup"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Job Rank</label>
+                            <div id="container-jobrank"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Perusahaan</label>
+                            <div id="container-perusahaan"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-indigo-500/20 space-y-3 relative overflow-visible transition-all">
+                    <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-indigo-400 to-violet-500 rounded-l-2xl"></div>
+                    <h4 class="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-300 flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800/80">
+                        <span class="flex items-center"><i class="fa-solid fa-sitemap text-indigo-500 dark:text-indigo-400 mr-2"></i> Struktur Organisasi & Kepegawaian</span>
+                        <span class="text-[9px] font-mono text-slate-400 dark:text-slate-500">SECTION ID: 02</span>
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Departemen</label>
+                            <div id="container-departemen"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Section</label>
+                            <div id="container-section"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Sub Section</label>
+                            <div id="container-subsection"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Custodian / Atasan / Leader</label>
+                            <div id="container-custodian"></div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Status Kepegawaian</label>
+                            <div id="container-status"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="db-dynamic-groups-wrapper" class="space-y-4"></div>
+                <div id="db-dynamic-fields-container" class="hidden"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-6 right-6 z-50 transform translate-y-24 opacity-0 transition-all duration-300 max-w-sm bg-white dark:bg-slate-900 border border-cyan-500/30 text-slate-800 dark:text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center space-x-3">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-500 text-lg"></i>
+        <span id="toast-msg" class="text-xs font-semibold">Berhasil.</span>
+    </div>
+
+    <script>
+        function normalizeNrp(val) {
+            if (!val) return '';
+            return String(val).trim().replace(/^0+/, '');
+        }
+
+        function initTheme() {
+            const savedTheme = localStorage.getItem('mp_theme') || 'dark';
+            applyTheme(savedTheme);
+        }
+
+        function toggleTheme() {
+            const isDark = document.documentElement.classList.contains('dark');
+            const newTheme = isDark ? 'light' : 'dark';
+            localStorage.setItem('mp_theme', newTheme);
+            applyTheme(newTheme);
+        }
+
+        function applyTheme(theme) {
+            const icon = document.getElementById('theme-btn-icon');
+            const text = document.getElementById('theme-btn-text');
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark');
+                if (icon) icon.className = 'fa-solid fa-moon text-cyan-400';
+                if (text) text.innerText = 'Gelap';
+            } else {
+                document.documentElement.classList.remove('dark');
+                if (icon) icon.className = 'fa-solid fa-sun text-amber-500';
+                if (text) text.innerText = 'Terang';
+            }
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            if (!toast) return;
+            const toastMsg = document.getElementById('toast-msg');
+            const toastIcon = document.getElementById('toast-icon');
+            if (toastMsg) toastMsg.innerText = message;
+            if (toastIcon) toastIcon.className = type === 'success' ? 'fa-solid fa-circle-check text-emerald-500 text-lg' : 'fa-solid fa-circle-exclamation text-rose-500 text-lg';
+            toast.classList.remove('translate-y-24', 'opacity-0');
+            setTimeout(() => toast.classList.add('translate-y-24', 'opacity-0'), 3000);
+        }
+
+        let manpowerData = [];
+        let dbFieldsList = [];
+        let currentUser = null;
+        let selectedMpNrps = new Set();
+        let selectedSettingsNrps = new Set();
+        let activeTargetNrpForModal = null;
+        let isSidebarHidden = false;
+
+        let mpPage = 1;
+        let mcuPage = 1;
+        let settingsPage = 1;
+        const pageSize = 50;
+
+        let selectedCompanies = new Set();
+        let selectedSections = new Set();
+        let selectedStatuses = new Set();
+
+        let selectedDashComp = new Set();
+        let selectedDashDept = new Set();
+        let selectedDashSec = new Set();
+        let selectedDashJg = new Set();
+        let selectedDashStat = new Set();
+
+        let progressInterval = null;
+
+        window.onload = function() { 
+            initTheme();
+            startProgressAnimation();
+            loadSpreadsheetData(false); 
+        };
+
+        function startProgressAnimation() {
+            let percent = 0;
+            const progressBar = document.getElementById('loader-progress-bar');
+            const percentText = document.getElementById('loader-percent');
+            const loaderText = document.getElementById('loader-text');
+            
+            if (!progressBar) return;
+            loaderText.innerText = "Memuat database Google Sheets...";
+            
+            if (progressInterval) clearInterval(progressInterval);
+            progressInterval = setInterval(() => {
+                if (percent < 85) {
+                    percent += Math.floor(Math.random() * 15) + 10;
+                    if (percent > 85) percent = 85;
+                    progressBar.style.width = percent + '%';
+                    percentText.innerText = percent + '%';
+                    
+                    if (percent > 40 && percent < 75) {
+                        loaderText.innerText = "Menyelaraskan data karyawan & relasi...";
+                    } else if (percent >= 75) {
+                        loaderText.innerText = "Mempersiapkan antarmuka sistem...";
+                    }
+                }
+            }, 30);
+        }
+
+        function finishProgressAnimation(callback) {
+            if (progressInterval) clearInterval(progressInterval);
+            const progressBar = document.getElementById('loader-progress-bar');
+            const percentText = document.getElementById('loader-percent');
+            const loaderText = document.getElementById('loader-text');
+
+            if (progressBar) progressBar.style.width = '100%';
+            if (percentText) percentText.innerText = '100%';
+            if (loaderText) loaderText.innerText = 'Selesai dimuat!';
+
+            setTimeout(() => {
+                const loader = document.getElementById('global-loader');
+                if (loader) {
+                    loader.classList.add('opacity-0');
+                    setTimeout(() => loader.classList.add('hidden'), 150);
+                }
+                if (typeof callback === 'function') callback();
+            }, 100);
+        }
+
+        function loadSpreadsheetData(isSync = false) {
+            const loader = document.getElementById('global-loader');
+            const syncBtnText = document.getElementById('btn-sync-text');
+            const bgSync = document.getElementById('bg-sync-indicator');
+            
+            if (isSync) {
+                if (bgSync) bgSync.classList.remove('hidden');
+                if (syncBtnText) syncBtnText.innerText = 'Synchronizing...';
+            } else {
+                if (loader) {
+                    loader.classList.remove('hidden', 'opacity-0');
+                    startProgressAnimation();
+                }
+            }
+
+            if (typeof google !== 'undefined' && google.script && google.script.run) {
+                const actionRunner = isSync ? google.script.run.withSuccessHandler(function(res) {
+                    manpowerData = res.data || [];
+                    dbFieldsList = res.dbFields || [];
+                    initAppData();
+                    if (bgSync) bgSync.classList.add('hidden');
+                    if (syncBtnText) syncBtnText.innerText = 'Synchronize';
+                    showToast('Data & binding sheet Manpower berhasil disinkronkan!', 'success');
+                }).withFailureHandler(function(err) {
+                    if (bgSync) bgSync.classList.add('hidden');
+                    if (syncBtnText) syncBtnText.innerText = 'Synchronize';
+                    showToast('Gagal sinkronisasi: ' + err.message, 'error');
+                }).executeManualSync() : google.script.run.withSuccessHandler(function(res) {
+                    manpowerData = res.data || [];
+                    dbFieldsList = res.dbFields || [];
+                    initAppData();
+                    finishProgressAnimation();
+                }).withFailureHandler(function(err) {
+                    finishProgressAnimation();
+                    showToast('Gagal memuat data: ' + err.message, 'error');
+                }).getManpowerDataFast();
+
+            } else {
+                setTimeout(() => {
+                    manpowerData = generateMockData();
+                    dbFieldsList = ["NRP", "Nama", "Alamat KTP", "No Telepon", "ALAMAT EMAIL (WAJIB DIISI)", "Tanggal Hasil MCU", "NO BPJS (OPSIONAL)", "Sub Section / Section", "Section", "JABATAN", "Perusahaan", "Status"];
+                    initAppData();
+                    if (isSync) {
+                        if (bgSync) bgSync.classList.add('hidden');
+                        if (syncBtnText) syncBtnText.innerText = 'Synchronize';
+                        showToast('Sinkronisasi Berhasil (Mock Mode)', 'success');
+                    } else {
+                        finishProgressAnimation();
+                    }
+                }, 150);
+            }
+        }
+
+        function initAppData() {
+            renderFilterDropdowns();
+            renderDashFilterDropdowns();
+            renderDashboardOverview();
+            renderManpowerTable();
+            renderMcuTable();
+            renderSettingsTable();
+
+            const savedUser = localStorage.getItem('mp_user');
+            if (savedUser) {
+                try {
+                    currentUser = JSON.parse(savedUser);
+                    showMainApp();
+                } catch(e) {
+                    showLoginView();
+                }
+            } else {
+                showLoginView();
+            }
+        }
+
+        function showLoginView() {
+            document.getElementById('login-view').classList.remove('hidden');
+            document.getElementById('main-layout').classList.add('hidden');
+        }
+
+        function showMainApp() {
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('main-layout').classList.remove('hidden');
+            if (currentUser) {
+                if (manpowerData && manpowerData.length > 0) {
+                    const normCurrent = normalizeNrp(currentUser.nrp);
+                    const freshUser = manpowerData.find(d => normalizeNrp(d.nrp) === normCurrent || String(d.nrp).trim() === String(currentUser.nrp).trim());
+                    if (freshUser) {
+                        currentUser = { ...currentUser, ...freshUser };
+                        localStorage.setItem('mp_user', JSON.stringify(currentUser));
+                    }
+                }
+
+                const displayName = currentUser.nama || currentUser.NAMA || currentUser.nrp || 'User';
+                const displayRole = (currentUser.role || currentUser.ROLE || 'user').toUpperCase();
+
+                const nameEl = document.getElementById('user-display-name');
+                const roleEl = document.getElementById('user-display-role');
+                if (nameEl) nameEl.innerText = displayName;
+                if (roleEl) roleEl.innerText = displayRole;
+            }
+        }
+
+        function handleLogin(event) {
+            event.preventDefault();
+            const nrp = document.getElementById('login-nrp').value.trim().toUpperCase();
+            const normInput = normalizeNrp(nrp);
+            
+            const found = manpowerData.find(d => normalizeNrp(d.nrp) === normInput) || 
+                        manpowerData.find(d => String(d.nrp).trim() === nrp) || 
+                        { nrp: nrp, nama: nrp, role: 'user' };
+            
+            currentUser = found;
+            localStorage.setItem('mp_user', JSON.stringify(currentUser));
+            showMainApp();
+            showToast(`Selamat datang, ${currentUser.nama || currentUser.nrp}!`, 'success');
+        }
+
+        function logout() {
+            localStorage.removeItem('mp_user');
+            currentUser = null;
+            showLoginView();
+            showToast('Berhasil keluar.', 'success');
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('text-cyan-600', 'dark:text-cyan-400', 'bg-cyan-500/10', 'border', 'border-cyan-500/20');
+                btn.classList.add('text-slate-500', 'dark:text-slate-400');
+            });
+
+            const targetSection = document.getElementById(`view-${tabId}`);
+            const targetNav = document.getElementById(`nav-${tabId}`);
+            if (targetSection) targetSection.classList.remove('hidden');
+            if (targetNav) {
+                targetNav.classList.remove('text-slate-500', 'dark:text-slate-400');
+                targetNav.classList.add('text-cyan-600', 'dark:text-cyan-400', 'bg-cyan-500/10', 'border', 'border-cyan-500/20');
+            }
+
+            const pageTitles = {
+                'dashboard': 'Dashboard Overview',
+                'manpower': 'Data Manpower',
+                'mcu': 'Manajemen Medical Check Up (MCU)',
+                'settings': 'User Role Settings'
+            };
+            document.getElementById('current-page-title').innerText = pageTitles[tabId] || 'MP System';
+        }
+
+        function renderDashFilterDropdowns() {
+            const companies = [...new Set(manpowerData.map(d => d.perusahaan).filter(Boolean))].sort();
+            const depts = [...new Set(manpowerData.map(d => d.departemen).filter(Boolean))].sort();
+            const sections = [...new Set(manpowerData.map(d => d.section).filter(Boolean))].sort();
+            const jobgroups = [...new Set(manpowerData.map(d => d.jobgroup).filter(Boolean))].sort();
+            const statuses = [...new Set(manpowerData.map(d => d.status).filter(Boolean))].sort();
+
+            createGenericFilterDropdown('dash-comp', 'Semua Perusahaan', companies, selectedDashComp, () => renderDashboardOverview());
+            createGenericFilterDropdown('dash-dept', 'Semua Departemen', depts, selectedDashDept, () => renderDashboardOverview());
+            createGenericFilterDropdown('dash-sec', 'Semua Section', sections, selectedDashSec, () => renderDashboardOverview());
+            createGenericFilterDropdown('dash-jg', 'Semua Job Group', jobgroups, selectedDashJg, () => renderDashboardOverview());
+            createGenericFilterDropdown('dash-stat', 'Semua Status', statuses, selectedDashStat, () => renderDashboardOverview());
+        }
+
+        function filterDashboardData() {
+            return manpowerData.filter(d => {
+                const matchComp = selectedDashComp.size === 0 || selectedDashComp.has(d.perusahaan);
+                const matchDept = selectedDashDept.size === 0 || selectedDashDept.has(d.departemen);
+                const matchSec = selectedDashSec.size === 0 || selectedDashSec.has(d.section);
+                const matchJg = selectedDashJg.size === 0 || selectedDashJg.has(d.jobgroup);
+                const matchStat = selectedDashStat.size === 0 || selectedDashStat.has(d.status);
+                return matchComp && matchDept && matchSec && matchJg && matchStat;
+            });
+        }
+
+        function renderDashboardOverview() {
+            const filtered = filterDashboardData();
+            
+            document.getElementById('stat-total-mp').innerText = filtered.length;
+            document.getElementById('stat-total-company').innerText = new Set(filtered.map(d => d.perusahaan).filter(Boolean)).size;
+            document.getElementById('stat-total-dept').innerText = new Set(filtered.map(d => d.departemen).filter(Boolean)).size;
+            document.getElementById('stat-total-section').innerText = new Set(filtered.map(d => d.section).filter(Boolean)).size;
+
+            renderDistributionChart('company-distribution', 'count-comp-chart', filtered, 'perusahaan', 'perusahaan');
+            renderDistributionChart('jobgroup-distribution', 'count-jg-chart', filtered, 'jobgroup', 'job group');
+        }
+
+        function renderDistributionChart(containerId, countId, data, key, labelSuffix) {
+            const container = document.getElementById(containerId);
+            const countLabel = document.getElementById(countId);
+            if (!container) return;
+
+            const counts = {};
+            data.forEach(d => {
+                const val = d[key] || 'Unassigned';
+                counts[val] = (counts[val] || 0) + 1;
+            });
+
+            const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+            const total = data.length || 1;
+
+            if (countLabel) countLabel.innerText = `${sorted.length} ${labelSuffix}`;
+
+            let html = '';
+            sorted.forEach(([name, count]) => {
+                const pct = Math.round((count / total) * 100);
+                html += `
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-xs font-semibold">
+                            <span class="text-slate-700 dark:text-slate-300 truncate max-w-[70%]">${name}</span>
+                            <span class="text-cyan-600 dark:text-cyan-400 font-mono">${count} (${pct}%)</span>
+                        </div>
+                        <div class="w-full bg-slate-200 dark:bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-300 dark:border-slate-800">
+                            <div class="bg-gradient-to-r from-cyan-500 to-blue-500 h-full rounded-full transition-all duration-300" style="width: ${pct}%"></div>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html || '<p class="text-xs text-slate-500 text-center py-4">Tidak ada data</p>';
+        }
+
+        function generateMockData() {
+            const mock = [];
+            const comps = ["PT SAPTAINDRA SEJATI", "PT UNITED TRACTORS", "PT TRIATRA SINERGIA"];
+            const depts = ["PLANT HAULING", "LOGISTICS", "OPERATION"];
+            const secs = ["PLANT PRIME MOVER", "PLANT FMC", "FIELD SUPPORT"];
+            const jgs = ["MECHANIC", "OPERATOR", "GROUP LEADER"];
+            
+            for (let i = 1; i <= 60; i++) {
+                const nrp = '011' + (3000 + i);
+                mock.push({
+                    rowIdx: i + 1,
+                    nrp: nrp,
+                    nama: `KARYAWAN DEMO ${i}`,
+                    position: `MECHANIC PRIME MOVER ${i}`,
+                    jobgroup: jgs[i % jgs.length],
+                    jobrank: 'NON STAFF',
+                    section: secs[i % secs.length],
+                    departemen: depts[i % depts.length],
+                    subsection: `SUB ${secs[i % secs.length]}`,
+                    custodian: `SUPERIOR ${i}`,
+                    status: i % 10 === 0 ? 'INACTIVE' : 'ACTIVE',
+                    perusahaan: comps[i % comps.length],
+                    role: i === 1 ? 'administrator' : 'user',
+                    dbRecord: {
+                        "Nama": `KARYAWAN DEMO ${i}`,
+                        "Alamat KTP": `JL. SUDIRMAN NO. ${i}, JAKARTA`,
+                        "No Telepon": `08123456789${i%10}`,
+                        "ALAMAT EMAIL (WAJIB DIISI)": `user${i}@company.com`,
+                        "Tanggal Hasil MCU": i % 3 === 0 ? `2024-01-15` : '',
+                        "NO BPJS (OPSIONAL)": `0001234567${i}`,
+                        "Sub Section / Section": `SUB ${secs[i % secs.length]}`,
+                        "Section": secs[i % secs.length],
+                        "JABATAN": jgs[i % jgs.length],
+                        "Perusahaan": comps[i % comps.length],
+                        "Status": i % 10 === 0 ? 'INACTIVE' : 'ACTIVE'
+                    }
+                });
+            }
+            return mock;
+        }
+
+        function deleteSelectedManpower() {
+            if (selectedMpNrps.size === 0) return;
+            const nrpList = Array.from(selectedMpNrps);
+
+            const loader = document.getElementById('global-loader');
+            loader.classList.remove('opacity-0', 'hidden');
+            document.getElementById('loader-text').innerText = "Menghapus data karyawan...";
+
+            if (typeof google !== 'undefined' && google.script && google.script.run) {
+                google.script.run
+                    .withSuccessHandler(function(res) {
+                        loader.classList.add('hidden');
+                        selectedMpNrps.clear();
+                        loadSpreadsheetData(false);
+                        showToast('Data berhasil dihapus!', 'success');
+                    })
+                    .withFailureHandler(function(err) {
+                        loader.classList.add('hidden');
+                        showToast('Gagal menghapus: ' + err.message, 'error');
+                    })
+                    .deleteManpowerRows(nrpList);
+            } else {
+                setTimeout(() => {
+                    const normSet = new Set(Array.from(selectedMpNrps).map(n => normalizeNrp(n)));
+                    manpowerData = manpowerData.filter(d => !normSet.has(normalizeNrp(d.nrp)));
+                    selectedMpNrps.clear();
+                    renderManpowerTable();
+                    renderMcuTable();
+                    renderDashboardOverview();
+                    loader.classList.add('hidden');
+                    showToast('Berhasil dihapus (Mock Mode)', 'success');
+                }, 300);
+            }
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('app-sidebar');
+            const labels = document.querySelectorAll('.sidebar-label');
+            const brand = document.getElementById('sidebar-brand');
+            const footerProfile = document.getElementById('sidebar-footer-profile');
+            isSidebarHidden = !isSidebarHidden;
+            if (isSidebarHidden) {
+                sidebar.classList.remove('w-64'); sidebar.classList.add('w-20');
+                labels.forEach(el => el.classList.add('hidden'));
+                brand.classList.add('justify-center'); footerProfile.classList.add('justify-center');
+            } else {
+                sidebar.classList.remove('w-20'); sidebar.classList.add('w-64');
+                labels.forEach(el => el.classList.remove('hidden'));
+                brand.classList.remove('justify-center'); footerProfile.classList.remove('justify-center');
+            }
+        }
+
+        function closeAllDropdowns(e) {
+            document.querySelectorAll('[id^="drop-filter-"], [id^="drop-dash-"], [id^="drop-ms-"]').forEach(el => {
+                el.classList.add('hidden');
+                let parentRel = el.closest('.relative');
+                if (parentRel) parentRel.style.zIndex = '';
+                let parentCard = el.closest('.bg-slate-950\\/60, .bg-slate-50');
+                if (parentCard) parentCard.style.zIndex = '';
+            });
+        }
+
+        function createGenericFilterDropdown(uniqueKey, placeholder, itemsList, selectedSetRef, onChangeCallback) {
+            let containerId = uniqueKey.startsWith('dash-') ? `filter-dash-container-${uniqueKey.replace('dash-', '')}` : `filter-container-${uniqueKey}`;
+            let container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            container.className = "relative w-full";
+            container.setAttribute('onclick', 'event.stopPropagation()');
+
+            let box = document.createElement('div');
+            box.id = `box-${uniqueKey}`;
+            box.className = "min-h-[38px] bg-white dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-1.5 flex flex-wrap items-center gap-1.5 cursor-pointer text-xs w-full relative";
+            box.setAttribute('onclick', `toggleGenericFilter('${uniqueKey}')`);
+
+            let dropdown = document.createElement('div');
+            dropdown.id = `drop-${uniqueKey}`;
+            dropdown.className = "hidden absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-40 p-2 space-y-1";
+
+            let actionDiv = document.createElement('div');
+            actionDiv.className = "flex items-center justify-between px-2 py-1 border-b border-slate-200 dark:border-slate-800 text-[10px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400";
+            actionDiv.innerHTML = `
+                <span class="cursor-pointer hover:underline" onclick="event.stopPropagation(); checkAllFilter('${uniqueKey}')">Check All</span>
+                <span class="cursor-pointer hover:underline text-rose-500" onclick="event.stopPropagation(); uncheckAllFilter('${uniqueKey}')">Uncheck All</span>
+            `;
+
+            let listDiv = document.createElement('div');
+            listDiv.id = `list-${uniqueKey}`;
+            listDiv.className = "max-h-40 overflow-y-auto space-y-1 pt-1";
+
+            dropdown.appendChild(actionDiv);
+            dropdown.appendChild(listDiv);
+            container.appendChild(box);
+            container.appendChild(dropdown);
+
+            window[`_filterOptions_${uniqueKey}`] = [...itemsList];
+            window[`_filterSelected_${uniqueKey}`] = selectedSetRef;
+            window[`_filterPlaceholder_${uniqueKey}`] = placeholder;
+            window[`_filterCallback_${uniqueKey}`] = onChangeCallback;
+
+            renderGenericFilterUI(uniqueKey);
+        }
+
+        window.toggleGenericFilter = function(uniqueKey) {
+            event.stopPropagation();
+            document.querySelectorAll('[id^="drop-filter-"], [id^="drop-dash-"]').forEach(el => {
+                if (el.id !== `drop-${uniqueKey}`) el.classList.add('hidden');
+            });
+            let drop = document.getElementById(`drop-${uniqueKey}`);
+            drop.classList.toggle('hidden');
+            if (!drop.classList.contains('hidden')) {
+                let input = document.getElementById(`inline-input-${uniqueKey}`);
+                if (input) input.focus();
+            }
+        };
+
+        window.renderGenericFilterUI = function(uniqueKey) {
+            let box = document.getElementById(`box-${uniqueKey}`);
+            let listDiv = document.getElementById(`list-${uniqueKey}`);
+            if (!box || !listDiv) return;
+
+            let selectedSet = window[`_filterSelected_${uniqueKey}`];
+            let options = window[`_filterOptions_${uniqueKey}`];
+            let placeholder = window[`_filterPlaceholder_${uniqueKey}`];
+            let currentSearchVal = document.getElementById(`inline-input-${uniqueKey}`)?.value || '';
+
+            box.innerHTML = '';
+            selectedSet.forEach(val => {
+                box.innerHTML += `<span class="px-2 py-0.5 bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 rounded-lg text-[10px] font-semibold flex items-center space-x-1"><span>${val}</span><i class="fa-solid fa-xmark ml-1 cursor-pointer hover:text-slate-900 dark:hover:text-white" onclick="event.stopPropagation(); removeGenericFilterItem('${uniqueKey}', '${val}')"></i></span>`;
+            });
+
+            let inlineInput = document.createElement('input');
+            inlineInput.type = "text";
+            inlineInput.id = `inline-input-${uniqueKey}`;
+            inlineInput.value = currentSearchVal;
+            inlineInput.placeholder = selectedSet.size === 0 ? placeholder : "Cari...";
+            inlineInput.className = "uppercase flex-1 bg-transparent border-none text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none min-w-[80px] py-1";
+            inlineInput.setAttribute('oninput', `this.value = this.value.toUpperCase(); filterGenericInline('${uniqueKey}')`);
+            box.appendChild(inlineInput);
+
+            let searchVal = currentSearchVal.toLowerCase();
+            listDiv.innerHTML = '';
+            let filtered = options.filter(opt => opt.toLowerCase().includes(searchVal));
+
+            if (filtered.length === 0) {
+                listDiv.innerHTML = `<div class="p-2 text-xs text-slate-400 text-center">Tidak ada data</div>`;
+                return;
+            }
+
+            filtered.forEach(opt => {
+                let isChecked = selectedSet.has(opt) ? 'checked' : '';
+                listDiv.innerHTML += `
+                    <label class="flex items-center space-x-2 px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-lg cursor-pointer text-xs text-slate-700 dark:text-slate-300" onclick="event.stopPropagation()">
+                        <input type="checkbox" ${isChecked} onchange="toggleGenericFilterItem('${uniqueKey}', '${opt}')" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5">
+                        <span class="font-medium truncate">${opt}</span>
+                    </label>
+                `;
+            });
+        };
+
+        window.filterGenericInline = function(uniqueKey) {
+            renderGenericFilterUI(uniqueKey);
+            let input = document.getElementById(`inline-input-${uniqueKey}`);
+            if (input) {
+                input.focus();
+                let val = input.value;
+                input.value = '';
+                input.value = val;
+            }
+        };
+
+        window.toggleGenericFilterItem = function(uniqueKey, val) {
+            let selectedSet = window[`_filterSelected_${uniqueKey}`];
+            if (selectedSet.has(val)) selectedSet.delete(val);
+            else selectedSet.add(val);
+
+            mpPage = 1;
+            renderGenericFilterUI(uniqueKey);
+            let cb = window[`_filterCallback_${uniqueKey}`];
+            if (typeof cb === 'function') cb();
+            let input = document.getElementById(`inline-input-${uniqueKey}`);
+            if (input) input.focus();
+        };
+
+        window.removeGenericFilterItem = function(uniqueKey, val) {
+            let selectedSet = window[`_filterSelected_${uniqueKey}`];
+            selectedSet.delete(val);
+            mpPage = 1;
+            renderGenericFilterUI(uniqueKey);
+            let cb = window[`_filterCallback_${uniqueKey}`];
+            if (typeof cb === 'function') cb();
+        };
+
+        window.checkAllFilter = function(uniqueKey) {
+            let selectedSet = window[`_filterSelected_${uniqueKey}`];
+            let options = window[`_filterOptions_${uniqueKey}`];
+            options.forEach(opt => selectedSet.add(opt));
+            mpPage = 1;
+            renderGenericFilterUI(uniqueKey);
+            let cb = window[`_filterCallback_${uniqueKey}`];
+            if (typeof cb === 'function') cb();
+        };
+
+        window.uncheckAllFilter = function(uniqueKey) {
+            let selectedSet = window[`_filterSelected_${uniqueKey}`];
+            selectedSet.clear();
+            mpPage = 1;
+            renderGenericFilterUI(uniqueKey);
+            let cb = window[`_filterCallback_${uniqueKey}`];
+            if (typeof cb === 'function') cb();
+        };
+
+        function renderFilterDropdowns() {
+            const companies = [...new Set(manpowerData.map(d => d.perusahaan).filter(Boolean))].sort();
+            const sections = [...new Set(manpowerData.map(d => d.section).filter(Boolean))].sort();
+            const statuses = [...new Set(manpowerData.map(d => d.status).filter(Boolean))].sort();
+
+            createGenericFilterDropdown('comp', 'Semua Perusahaan', companies, selectedCompanies, () => renderManpowerTable());
+            createGenericFilterDropdown('sec', 'Semua Section', sections, selectedSections, () => renderManpowerTable());
+            createGenericFilterDropdown('stat', 'Semua Status', statuses, selectedStatuses, () => renderManpowerTable());
+        }
+
+        function matchesMultiFilters(item) {
+            const query = document.getElementById('search-mp').value.toLowerCase();
+            const matchQuery = !query || Object.values(item).join(' ').toLowerCase().includes(query);
+            const matchComp = selectedCompanies.size === 0 || selectedCompanies.has(item.perusahaan);
+            const matchSec = selectedSections.size === 0 || selectedSections.has(item.section);
+            const matchStat = selectedStatuses.size === 0 || selectedStatuses.has(item.status);
+            return matchQuery && matchComp && matchSec && matchStat;
+        }
+
+        function renderManpowerTable() {
+            const filtered = manpowerData.filter(item => matchesMultiFilters(item));
+            const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+            if (mpPage > totalPages) mpPage = totalPages;
+            
+            const startIdx = (mpPage - 1) * pageSize;
+            const paginatedItems = filtered.slice(startIdx, startIdx + pageSize);
+
+            const tbody = document.getElementById('manpower-table-body');
+            tbody.innerHTML = '';
+
+            paginatedItems.forEach(item => {
+                const isChecked = selectedMpNrps.has(item.nrp) ? 'checked' : '';
+                const safeNrp = String(item.nrp || '').replace(/'/g, "\\'");
+                tbody.innerHTML += `
+                    <tr class="hover:bg-slate-100 dark:hover:bg-slate-800/40 transition border-b border-slate-200 dark:border-slate-800/50 cursor-pointer" onclick="openViewModal('${safeNrp}')">
+                        <td class="p-3 text-center" onclick="event.stopPropagation()"><input type="checkbox" ${isChecked} onclick="toggleMpSelection('${safeNrp}')" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5"></td>
+                        <td class="p-3 text-center" onclick="event.stopPropagation()"><button type="button" onclick="openViewModal('${safeNrp}')" class="px-2.5 py-1.5 bg-cyan-500/10 hover:bg-cyan-500 hover:text-white text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 rounded-lg text-xs transition cursor-pointer" title="Lihat Detail"><i class="fa-solid fa-eye pointer-events-none"></i></button></td>
+                        <td class="p-3 font-mono text-cyan-600 dark:text-cyan-300 font-semibold">${item.nrp}</td>
+                        <td class="p-3 font-bold text-slate-900 dark:text-white">${item.nama}</td>
+                        <td class="p-3 truncate">${item.position || ''}</td>
+                        <td class="p-3 truncate">${item.section || ''}</td>
+                        <td class="p-3 truncate">${item.jobgroup || ''}</td>
+                        <td class="p-3 truncate">${item.departemen || ''}</td>
+                        <td class="p-3 text-center"><span class="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold uppercase">${item.status || 'Active'}</span></td>
+                        <td class="p-3 truncate">${item.perusahaan || ''}</td>
+                        <td class="p-3 text-center"><span class="px-2 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-300 rounded-full text-[10px] font-bold uppercase tracking-wider">${item.role || 'user'}</span></td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('mp-pagination-status').innerText = `Menampilkan ${startIdx + 1}-${Math.min(startIdx + pageSize, filtered.length)} dari ${filtered.length} data`;
+            renderPaginationButtons('mp-pagination-buttons', mpPage, totalPages, (p) => { mpPage = p; renderManpowerTable(); });
+            document.getElementById('delete-mp-btn').disabled = selectedMpNrps.size === 0;
+        }
+
+        function renderMcuTable() {
+            const query = document.getElementById('search-mcu')?.value.toLowerCase() || '';
+            const filtered = manpowerData.filter(item => {
+                const dbRec = item.dbRecord || {};
+                const mcuVal = Object.entries(dbRec).find(([k]) => k.toLowerCase().includes('mcu') || k.toLowerCase().includes('tanggal hasil mcu'))?.[1] || '';
+                const matchQuery = !query || Object.values(item).join(' ').toLowerCase().includes(query) || String(mcuVal).toLowerCase().includes(query);
+                return matchQuery;
+            });
+
+            const totalMcuCount = manpowerData.length;
+            let validMcuCount = 0;
+            manpowerData.forEach(item => {
+                const dbRec = item.dbRecord || {};
+                const mcuVal = Object.entries(dbRec).find(([k]) => k.toLowerCase().includes('mcu') || k.toLowerCase().includes('tanggal hasil mcu'))?.[1] || '';
+                if (mcuVal && String(mcuVal).trim()) validMcuCount++;
+            });
+            const missingMcuCount = totalMcuCount - validMcuCount;
+
+            document.getElementById('stat-mcu-total').innerText = totalMcuCount;
+            document.getElementById('stat-mcu-valid').innerText = validMcuCount;
+            document.getElementById('stat-mcu-missing').innerText = missingMcuCount;
+
+            const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+            if (mcuPage > totalPages) mcuPage = totalPages;
+            
+            const startIdx = (mcuPage - 1) * pageSize;
+            const paginatedItems = filtered.slice(startIdx, startIdx + pageSize);
+
+            const tbody = document.getElementById('mcu-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            paginatedItems.forEach(item => {
+                const dbRec = item.dbRecord || {};
+                const mcuVal = Object.entries(dbRec).find(([k]) => k.toLowerCase().includes('mcu') || k.toLowerCase().includes('tanggal hasil mcu'))?.[1] || '';
+                const hasMcu = mcuVal && String(mcuVal).trim() !== '';
+                const safeNrp = String(item.nrp || '').replace(/'/g, "\\'");
+
+                tbody.innerHTML += `
+                    <tr class="hover:bg-slate-100 dark:hover:bg-slate-800/40 transition border-b border-slate-200 dark:border-slate-800/50 cursor-pointer" onclick="openViewModal('${safeNrp}')">
+                        <td class="p-3 text-center" onclick="event.stopPropagation()"><button type="button" onclick="openViewModal('${safeNrp}')" class="px-2.5 py-1.5 bg-cyan-500/10 hover:bg-cyan-500 hover:text-white text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 rounded-lg text-xs transition cursor-pointer" title="Lihat / Edit MCU"><i class="fa-solid fa-heart-pulse pointer-events-none"></i></button></td>
+                        <td class="p-3 font-mono text-cyan-600 dark:text-cyan-300 font-semibold">${item.nrp}</td>
+                        <td class="p-3 font-bold text-slate-900 dark:text-white">${item.nama}</td>
+                        <td class="p-3 truncate">${item.position || ''}</td>
+                        <td class="p-3 truncate">${item.section || ''}</td>
+                        <td class="p-3 truncate">${item.perusahaan || ''}</td>
+                        <td class="p-3 font-mono text-center">${hasMcu ? mcuVal : '<span class="text-rose-500 font-semibold">Belum Ada</span>'}</td>
+                        <td class="p-3 text-center"><span class="px-2.5 py-0.5 ${hasMcu ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400'} border rounded-full text-[10px] font-bold uppercase tracking-wider">${hasMcu ? 'SUDAH MCU' : 'BELUM MCU'}</span></td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('mcu-pagination-status').innerText = `Menampilkan ${startIdx + 1}-${Math.min(startIdx + pageSize, filtered.length)} dari ${filtered.length} data`;
+            renderPaginationButtons('mcu-pagination-buttons', mcuPage, totalPages, (p) => { mcuPage = p; renderMcuTable(); });
+        }
+
+        function renderSettingsTable() {
+            const query = document.getElementById('search-settings').value.toLowerCase();
+            const filtered = manpowerData.filter(item => Object.values(item).join(' ').toLowerCase().includes(query));
+            const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+            if (settingsPage > totalPages) settingsPage = totalPages;
+            
+            const startIdx = (settingsPage - 1) * pageSize;
+            const paginatedItems = filtered.slice(startIdx, startIdx + pageSize);
+
+            const tbody = document.getElementById('settings-table-body');
+            tbody.innerHTML = '';
+
+            paginatedItems.forEach(item => {
+                const isChecked = selectedSettingsNrps.has(item.nrp) ? 'checked' : '';
+                tbody.innerHTML += `
+                    <tr class="hover:bg-slate-100 dark:hover:bg-slate-800/40 transition border-b border-slate-200 dark:border-slate-800/50">
+                        <td class="p-3 text-center"><input type="checkbox" ${isChecked} onclick="toggleSettingsSelection('${item.nrp}')" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-500 w-3.5 h-3.5"></td>
+                        <td class="p-3 text-center"><button type="button" onclick="openSingleRoleModal('${item.nrp}')" class="px-2 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-cyan-600 hover:text-white text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px]"><i class="fa-solid fa-pen-to-square"></i></button></td>
+                        <td class="p-3 font-mono text-cyan-600 dark:text-cyan-300 font-semibold">${item.nrp}</td>
+                        <td class="p-3 font-bold text-slate-900 dark:text-white">${item.nama}</td>
+                        <td class="p-3 truncate">${item.position || ''}</td>
+                        <td class="p-3 truncate">${item.jobgroup || ''}</td>
+                        <td class="p-3 truncate">${item.section || ''}</td>
+                        <td class="p-3 truncate">${item.perusahaan || ''}</td>
+                        <td class="p-3 text-center"><span class="px-2.5 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-300 rounded-full text-[10px] font-bold uppercase tracking-wider">${item.role || 'user'}</span></td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('settings-pagination-status').innerText = `Menampilkan ${startIdx + 1}-${Math.min(startIdx + pageSize, filtered.length)} dari ${filtered.length} data`;
+            renderPaginationButtons('settings-pagination-buttons', settingsPage, totalPages, (p) => { settingsPage = p; renderSettingsTable(); });
+            document.getElementById('batch-role-btn').disabled = selectedSettingsNrps.size === 0;
+        }
+
+        function renderPaginationButtons(containerId, currentPage, totalPages, callbackName) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            let startPage = Math.max(1, currentPage - 2);
+            let endPage = Math.min(totalPages, startPage + 4);
+            if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+
+            if (currentPage > 1) {
+                container.innerHTML += `<button type="button" onclick="(${callbackName})(1)" class="px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"><i class="fa-solid fa-angles-left"></i></button>`;
+                container.innerHTML += `<button type="button" onclick="(${callbackName})(${currentPage - 1})" class="px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"><i class="fa-solid fa-angle-left"></i></button>`;
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                const active = i === currentPage ? 'bg-cyan-600 text-white font-bold border border-cyan-500' : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800';
+                container.innerHTML += `<button type="button" onclick="(${callbackName})(${i})" class="px-3 py-1 rounded text-xs ${active}">${i}</button>`;
+            }
+
+            if (currentPage < totalPages) {
+                container.innerHTML += `<button type="button" onclick="(${callbackName})(${currentPage + 1})" class="px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"><i class="fa-solid fa-angle-right"></i></button>`;
+                container.innerHTML += `<button type="button" onclick="(${callbackName})(${totalPages})" class="px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"><i class="fa-solid fa-angles-right"></i></button>`;
+            }
+        }
+
+        function toggleMpSelection(nrp) {
+            if (selectedMpNrps.has(nrp)) selectedMpNrps.delete(nrp);
+            else selectedMpNrps.add(nrp);
+            renderManpowerTable();
+        }
+
+        function toggleSelectAllManpower(cb) {
+            const filtered = manpowerData.filter(item => matchesMultiFilters(item));
+            filtered.forEach(item => {
+                if (cb.checked) selectedMpNrps.add(item.nrp);
+                else selectedMpNrps.delete(item.nrp);
+            });
+            renderManpowerTable();
+        }
+
+        function toggleSettingsSelection(nrp) {
+            if (selectedSettingsNrps.has(nrp)) selectedSettingsNrps.delete(nrp);
+            else selectedSettingsNrps.add(nrp);
+            renderSettingsTable();
+        }
+
+        function toggleSelectAllSettings(cb) {
+            manpowerData.forEach(item => {
+                if (cb.checked) selectedSettingsNrps.add(item.nrp);
+                else selectedSettingsNrps.delete(item.nrp);
+            });
+            renderSettingsTable();
+        }
+
+        function isDateField(fieldName) {
+            const lower = String(fieldName || '').toLowerCase();
+            if (lower.includes('tempat') || lower.includes('birthplace')) return false;
+            return lower.includes('tanggal') || lower.includes('date') || lower.includes('tgl') || lower.includes('dob') || lower.includes('lahir') || lower.includes('expired') || lower.includes('masa') || lower.includes('mulai') || lower.includes('bekerja') || lower.includes('mcu');
+        }
+
+        function formatDateForInput(val) {
+            if (!val) return '';
+            let d = new Date(val);
+            if (!isNaN(d.getTime())) {
+                let year = d.getFullYear();
+                let month = String(d.getMonth() + 1).padStart(2, '0');
+                let day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            }
+            let str = String(val).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+            return '';
+        }
+
+        function createSearchableMultiSelect(id, currentValue, optionsList) {
+            let container = document.createElement('div');
+            container.className = "relative w-full z-10";
+            container.setAttribute('onclick', 'event.stopPropagation()');
+
+            let uniqueKey = `ms-${id.replace(/[^a-zA-Z0-9]/g, '_')}-${Math.random().toString(36).substring(2, 7)}`;
+            let initialValues = new Set(currentValue ? String(currentValue).split(',').map(s => s.trim()).filter(Boolean) : []);
+
+            let box = document.createElement('div');
+            box.id = `box-${uniqueKey}`;
+            box.className = "min-h-[36px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-2.5 py-1 flex flex-wrap items-center gap-1 cursor-pointer text-xs w-full relative hover:border-slate-400 dark:hover:border-slate-700 transition";
+            box.setAttribute('onclick', `focusFieldInput('${uniqueKey}')`);
+
+            let dropdown = document.createElement('div');
+            dropdown.id = `drop-${uniqueKey}`;
+            dropdown.className = "hidden absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200 dark:border-cyan-500/40 rounded-2xl shadow-2xl z-50 p-2 space-y-1";
+
+            let listDiv = document.createElement('div');
+            listDiv.id = `list-${uniqueKey}`;
+            listDiv.className = "max-h-52 overflow-y-auto space-y-1";
+
+            let hiddenInput = document.createElement('input');
+            hiddenInput.type = "hidden";
+            hiddenInput.id = id;
+            hiddenInput.value = currentValue || "";
+
+            dropdown.appendChild(listDiv);
+            container.appendChild(box);
+            container.appendChild(dropdown);
+            container.appendChild(hiddenInput);
+
+            window[`_fieldOptions_${uniqueKey}`] = [...optionsList];
+            window[`_fieldSelected_${uniqueKey}`] = initialValues;
+
+            setTimeout(() => renderFieldDropdownUI(uniqueKey), 0);
+            return container;
+        }
+
+        window.focusFieldInput = function(uniqueKey) {
+            event.stopPropagation();
+            document.querySelectorAll('[id^="drop-ms-"]').forEach(el => {
+                if (el.id !== `drop-${uniqueKey}`) {
+                    el.classList.add('hidden');
+                    let pRel = el.closest('.relative');
+                    if (pRel) pRel.style.zIndex = '';
+                    let pCard = el.closest('.bg-slate-950\\/60, .bg-slate-50');
+                    if (pCard) pCard.style.zIndex = '';
+                }
+            });
+            let drop = document.getElementById(`drop-${uniqueKey}`);
+            if (!drop) return;
+
+            let parentRel = drop.closest('.relative');
+            let parentCard = drop.closest('.bg-slate-950\\/60, .bg-slate-50');
+
+            drop.classList.toggle('hidden');
+            if (!drop.classList.contains('hidden')) {
+                if (parentRel) parentRel.style.zIndex = '50';
+                if (parentCard) parentCard.style.zIndex = '40';
+                let input = document.getElementById(`inline-input-${uniqueKey}`);
+                if (input) input.focus();
+            } else {
+                if (parentRel) parentRel.style.zIndex = '';
+                if (parentCard) parentCard.style.zIndex = '';
+            }
+        };
+
+        window.renderFieldDropdownUI = function(uniqueKey) {
+            let box = document.getElementById(`box-${uniqueKey}`);
+            let listDiv = document.getElementById(`list-${uniqueKey}`);
+            if (!box || !listDiv) return;
+            
+            let hiddenInput = box.parentElement.querySelector('input[type="hidden"]');
+            let selectedSet = window[`_fieldSelected_${uniqueKey}`] || new Set();
+            let options = window[`_fieldOptions_${uniqueKey}`] || [];
+            let currentSearchVal = document.getElementById(`inline-input-${uniqueKey}`)?.value || '';
+
+            box.innerHTML = '';
+            selectedSet.forEach(val => {
+                box.innerHTML += `<span class="px-2 py-0.5 bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 rounded-lg text-[11px] font-semibold flex items-center space-x-1"><span>${val}</span><i class="fa-solid fa-xmark ml-1 cursor-pointer hover:text-slate-900 dark:hover:text-white" onclick="event.stopPropagation(); removeFieldValue('${uniqueKey}', '${val}')"></i></span>`;
+            });
+
+            let inlineInput = document.createElement('input');
+            inlineInput.type = "text";
+            inlineInput.id = `inline-input-${uniqueKey}`;
+            inlineInput.value = currentSearchVal;
+            inlineInput.placeholder = selectedSet.size === 0 ? "Pilih..." : "Tambah...";
+            inlineInput.className = "uppercase flex-1 bg-transparent border-none text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none min-w-[70px] py-0.5";
+            inlineInput.setAttribute('oninput', `this.value = this.value.toUpperCase(); filterFieldInline('${uniqueKey}')`);
+            inlineInput.setAttribute('onkeydown', `handleFieldInlineKeydown(event, '${uniqueKey}')`);
+            box.appendChild(inlineInput);
+
+            if (hiddenInput) {
+                hiddenInput.value = Array.from(selectedSet).join(', ');
+            }
+
+            let searchVal = currentSearchVal.toLowerCase();
+            listDiv.innerHTML = '';
+            let filtered = options.filter(opt => opt.toLowerCase().includes(searchVal));
+
+            if (filtered.length === 0 && searchVal) {
+                let upperVal = currentSearchVal.trim().toUpperCase();
+                listDiv.innerHTML = `<div class="p-2 text-xs text-cyan-600 dark:text-cyan-400 italic cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 rounded" onclick="addNewFieldInline('${uniqueKey}', '${upperVal}')">Tekan Enter untuk menambah "<b>${upperVal}</b>"</div>`;
+                return;
+            }
+
+            filtered.forEach(opt => {
+                let isChecked = selectedSet.has(opt) ? 'checked' : '';
+                listDiv.innerHTML += `
+                    <label class="flex items-center space-x-2 px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-lg cursor-pointer text-xs text-slate-700 dark:text-slate-200" onclick="event.stopPropagation()">
+                        <input type="checkbox" ${isChecked} onchange="toggleFieldValue('${uniqueKey}', '${opt}')" class="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-cyan-500 w-3.5 h-3.5">
+                        <span class="font-medium truncate">${opt}</span>
+                    </label>
+                `;
+            });
+        };
+
+        window.filterFieldInline = function(uniqueKey) {
+            renderFieldDropdownUI(uniqueKey);
+            let input = document.getElementById(`inline-input-${uniqueKey}`);
+            if (input) {
+                input.focus();
+                let val = input.value;
+                input.value = '';
+                input.value = val;
+            }
+        };
+
+        window.handleFieldInlineKeydown = function(event, uniqueKey) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                let val = event.target.value.trim().toUpperCase();
+                if (val) addNewFieldInline(uniqueKey, val);
+            }
+        };
+
+        window.addNewFieldInline = function(uniqueKey, val) {
+            if (!val) return;
+            let upperVal = val.toUpperCase();
+            let selectedSet = window[`_fieldSelected_${uniqueKey}`];
+            let options = window[`_fieldOptions_${uniqueKey}`];
+            selectedSet.add(upperVal);
+            if (!options.includes(upperVal)) options.push(upperVal);
+            
+            let input = document.getElementById(`inline-input-${uniqueKey}`);
+            if (input) input.value = '';
+            renderFieldDropdownUI(uniqueKey);
+            let newInput = document.getElementById(`inline-input-${uniqueKey}`);
+            if (newInput) newInput.focus();
+        };
+
+        window.toggleFieldValue = function(uniqueKey, val) {
+            let selectedSet = window[`_fieldSelected_${uniqueKey}`];
+            if (selectedSet.has(val)) selectedSet.delete(val);
+            else selectedSet.add(val);
+            renderFieldDropdownUI(uniqueKey);
+            let input = document.getElementById(`inline-input-${uniqueKey}`);
+            if (input) input.focus();
+        };
+
+        window.removeFieldValue = function(uniqueKey, val) {
+            let selectedSet = window[`_fieldSelected_${uniqueKey}`];
+            selectedSet.delete(val);
+            renderFieldDropdownUI(uniqueKey);
+            let input = document.getElementById(`inline-input-${uniqueKey}`);
+            if (input) input.focus();
+        };
+
+        function openAddModal() {
+            const addNrp = document.getElementById('add-nrp');
+            const addNama = document.getElementById('add-nama');
+            const addEmail = document.getElementById('add-email');
+            
+            if (addNrp) addNrp.value = '';
+            if (addNama) addNama.value = '';
+            if (addEmail) addEmail.value = '';
+
+            const uniquePositions = [...new Set(manpowerData.map(d => d.position).filter(Boolean))].sort();
+            const uniqueJobGroups = [...new Set(manpowerData.map(d => d.jobgroup).filter(Boolean))].sort();
+            const uniqueJobRanks = [...new Set(manpowerData.map(d => d.jobrank).filter(Boolean))].sort();
+            const uniqueSections = [...new Set(manpowerData.map(d => d.section).filter(Boolean))].sort();
+            const uniqueSubSections = [...new Set(manpowerData.map(d => d.subsection).filter(Boolean))].sort();
+            const uniqueCustodians = [...new Set(manpowerData.map(d => d.custodian).filter(Boolean))].sort();
+            const uniqueDepartemens = [...new Set(manpowerData.map(d => d.departemen).filter(Boolean))].sort();
+            const uniqueCompanies = [...new Set(manpowerData.map(d => d.perusahaan).filter(Boolean))].sort();
+            const uniqueCategories = [...new Set(manpowerData.map(d => d.category).filter(Boolean))].sort();
+
+            const setContainer = (id, fieldName, value, options) => {
+                const container = document.getElementById(id);
+                if (container) {
+                    container.innerHTML = '';
+                    container.appendChild(createSearchableMultiSelect(fieldName, value, options));
+                }
+            };
+
+            setContainer('add-container-position', 'add-position', '', uniquePositions);
+            setContainer('add-container-jobgroup', 'add-jobgroup', '', uniqueJobGroups);
+            setContainer('add-container-jobrank', 'add-jobrank', '', uniqueJobRanks);
+            setContainer('add-container-section', 'add-section', '', uniqueSections);
+            setContainer('add-container-subsection', 'add-subsection', '', uniqueSubSections);
+            setContainer('add-container-custodian', 'add-custodian', '', uniqueCustodians);
+            setContainer('add-container-departemen', 'add-departemen', '', uniqueDepartemens);
+            setContainer('add-container-perusahaan', 'add-perusahaan', '', uniqueCompanies);
+            setContainer('add-container-category', 'add-category', '', uniqueCategories);
+
+            document.getElementById('add-modal').classList.remove('hidden');
+        }
+
+        function closeAddModal() {
+            document.getElementById('add-modal').classList.add('hidden');
+        }
+
+        function triggerSaveNewManpower() {
+            document.getElementById('add-manpower-form').requestSubmit();
+        }
+
+        function saveNewManpower(event) {
+            event.preventDefault();
+            const emailVal = document.getElementById('add-email').value.trim().toLowerCase();
+
+            const newManpower = {
+                nrp: document.getElementById('add-nrp').value.trim().toUpperCase(),
+                nama: document.getElementById('add-nama').value.trim().toUpperCase(),
+                position: document.getElementById('add-position')?.value.trim().toUpperCase() || '',
+                jobgroup: document.getElementById('add-jobgroup')?.value.trim().toUpperCase() || '',
+                jobrank: document.getElementById('add-jobrank')?.value.trim().toUpperCase() || '',
+                section: document.getElementById('add-section')?.value.trim().toUpperCase() || '',
+                subsection: document.getElementById('add-subsection')?.value.trim().toUpperCase() || '',
+                custodian: document.getElementById('add-custodian')?.value.trim().toUpperCase() || '',
+                departemen: document.getElementById('add-departemen')?.value.trim().toUpperCase() || '',
+                status: 'ACTIVE',
+                perusahaan: document.getElementById('add-perusahaan')?.value.trim().toUpperCase() || '',
+                category: document.getElementById('add-category')?.value.trim().toUpperCase() || '',
+                role: 'user'
+            };
+
+            let dbUpdates = {
+                'ALAMAT EMAIL (WAJIB DIISI)': emailVal,
+                'Sub Section / Section': newManpower.subsection,
+                'Section': newManpower.section,
+                'JABATAN': newManpower.jobgroup,
+                'Status': 'ACTIVE'
+            };
+
+            const loader = document.getElementById('global-loader');
+            loader.classList.remove('opacity-0', 'hidden');
+            document.getElementById('loader-text').innerText = "Menambahkan manpower baru...";
+            closeAddModal();
+
+            if (typeof google !== 'undefined' && google.script && google.script.run) {
+                google.script.run
+                    .withSuccessHandler(function(res) {
+                        loader.classList.add('hidden');
+                        if (res.success) {
+                            loadSpreadsheetData(false);
+                            showToast('Karyawan baru berhasil ditambahkan!', 'success');
+                        } else {
+                            showToast('Gagal: ' + res.error, 'error');
+                        }
+                    })
+                    .withFailureHandler(function(err) {
+                        loader.classList.add('hidden');
+                        showToast('Error: ' + err.message, 'error');
+                    })
+                    .createNewManpower({ item: newManpower, dbUpdates: dbUpdates });
+            } else {
+                setTimeout(() => {
+                    manpowerData.unshift({
+                        rowIdx: manpowerData.length + 2,
+                        ...newManpower,
+                        dbRecord: { 'ALAMAT EMAIL (WAJIB DIISI)': emailVal, 'Status': 'ACTIVE' }
+                    });
+                    renderManpowerTable();
+                    renderMcuTable();
+                    renderDashboardOverview();
+                    loader.classList.add('hidden');
+                    showToast('Berhasil ditambahkan (Mock Mode)', 'success');
+                }, 400);
+            }
+        }
+
+        function openViewModal(nrp) {
+            try {
+                const normTarget = normalizeNrp(nrp);
+                const item = manpowerData.find(d => normalizeNrp(d.nrp) === normTarget || String(d.nrp).trim() === String(nrp).trim() || String(d.rowIdx) === String(nrp));
+                if (!item) {
+                    showToast('Data karyawan tidak ditemukan!', 'error');
+                    return;
+                }
+
+                const editRowIdx = document.getElementById('edit-row-idx');
+                const editNrp = document.getElementById('edit-nrp');
+                const editNama = document.getElementById('edit-nama');
+                if (editRowIdx) editRowIdx.value = item.rowIdx || '';
+                if (editNrp) editNrp.value = (item.nrp || '').toUpperCase();
+                if (editNama) editNama.value = (item.nama || '').toUpperCase();
+
+                const uniquePositions = [...new Set(manpowerData.map(d => d.position).filter(Boolean))].sort();
+                const uniqueJobGroups = [...new Set(manpowerData.map(d => d.jobgroup).filter(Boolean))].sort();
+                const uniqueJobRanks = [...new Set(manpowerData.map(d => d.jobrank).filter(Boolean))].sort();
+                const uniqueSections = [...new Set(manpowerData.map(d => d.section).filter(Boolean))].sort();
+                const uniqueSubSections = [...new Set(manpowerData.map(d => d.subsection).filter(Boolean))].sort();
+                const uniqueCustodians = [...new Set(manpowerData.map(d => d.custodian).filter(Boolean))].sort();
+                const uniqueDepartemens = [...new Set(manpowerData.map(d => d.departemen).filter(Boolean))].sort();
+                const uniqueStatuses = [...new Set(manpowerData.map(d => d.status).filter(Boolean))].sort();
+                if (uniqueStatuses.length === 0) uniqueStatuses.push("Active", "Inactive", "Resign");
+                const uniqueCompanies = [...new Set(manpowerData.map(d => d.perusahaan).filter(Boolean))].sort();
+
+                const setContainer = (id, fieldName, value, options) => {
+                    const container = document.getElementById(id);
+                    if (container) {
+                        container.innerHTML = '';
+                        container.appendChild(createSearchableMultiSelect(fieldName, value, options));
+                    }
+                };
+
+                setContainer('container-position', 'edit-position', item.position, uniquePositions);
+                setContainer('container-jobgroup', 'edit-jobgroup', item.jobgroup, uniqueJobGroups);
+                setContainer('container-jobrank', 'edit-jobrank', item.jobrank, uniqueJobRanks);
+                setContainer('container-section', 'edit-section', item.section, uniqueSections);
+                setContainer('container-subsection', 'edit-subsection', item.subsection, uniqueSubSections);
+                setContainer('container-custodian', 'edit-custodian', item.custodian, uniqueCustodians);
+                setContainer('container-departemen', 'edit-departemen', item.departemen, uniqueDepartemens);
+                setContainer('container-status', 'edit-status', item.status || 'Active', uniqueStatuses);
+                setContainer('container-perusahaan', 'edit-perusahaan', item.perusahaan, uniqueCompanies);
+
+                let groupsWrapper = document.getElementById('db-dynamic-groups-wrapper');
+                if (!groupsWrapper) {
+                    groupsWrapper = document.getElementById('db-dynamic-fields-container');
+                }
+                if (groupsWrapper) {
+                    groupsWrapper.innerHTML = '';
+                    groupsWrapper.classList.remove('hidden');
+                }
+
+                const dbRec = item.dbRecord || {};
+                
+                const addressFields = [];
+                const personalFields = [];
+                const otherFields = [];
+
+                (dbFieldsList || []).forEach(field => {
+                    const lower = String(field || '').toLowerCase();
+                    if (lower === 'nrp' || lower === 'nama' || lower === 'superior' || lower === 'perusahaan') return;
+                    
+                    if (lower.includes('alamat') || lower.includes('ktp') || lower.includes('domisili') || lower.includes('provinsi') || lower.includes('kabupaten') || lower.includes('kota') || lower.includes('kecamatan') || lower.includes('kelurahan') || lower.includes('desa') || lower.includes('rt') || lower.includes('rw') || lower.includes('passport')) {
+                        addressFields.push(field);
+                    } else if (lower.includes('lahir') || lower.includes('kelamin') || lower.includes('agama') || lower.includes('pendidikan') || lower.includes('nik') || lower.includes('status') || lower.includes('darah') || lower.includes('telepon') || lower.includes('phone') || lower.includes('hp') || lower.includes('email') || lower.includes('darurat')) {
+                        personalFields.push(field);
+                    } else {
+                        otherFields.push(field);
+                    }
+                });
+
+                function renderFieldGroup(title, iconClass, groupBorder, accentLine, sectionCode, fieldsArray) {
+                    if (!groupsWrapper || fieldsArray.length === 0) return;
+                    let groupDiv = document.createElement('div');
+                    groupDiv.className = `bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border ${groupBorder} space-y-3 relative overflow-visible transition-all`;
+                    
+                    let cleanId = `group-fields-${title.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+                    groupDiv.innerHTML = `
+                        <div class="absolute top-0 left-0 w-1 h-full ${accentLine} rounded-l-2xl"></div>
+                        <h4 class="text-[11px] font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800/80">
+                            <span class="flex items-center"><i class="${iconClass} mr-2"></i> ${title}</span>
+                            <span class="text-[9px] font-mono text-slate-400 dark:text-slate-500">${sectionCode}</span>
+                        </h4>
+                        <div id="${cleanId}" class="grid grid-cols-1 sm:grid-cols-2 gap-3.5"></div>
+                    `;
+                    groupsWrapper.appendChild(groupDiv);
+
+                    let subContainer = groupDiv.querySelector(`#${cleanId}`);
+
+                    fieldsArray.forEach(field => {
+                        const rawVal = dbRec[field] !== undefined ? dbRec[field] : '';
+                        const lowerField = String(field).toLowerCase().trim();
+                        const isDate = isDateField(field);
+
+                        let displayLabel = field;
+
+                        if (lowerField.includes('email')) {
+                            displayLabel = 'ALAMAT EMAIL (WAJIB DIISI)';
+                        } else if (lowerField.includes('tanggal') && lowerField.includes('mcu')) {
+                            displayLabel = 'Tanggal Hasil MCU';
+                        }
+
+                        let wrapper = document.createElement('div');
+                        wrapper.innerHTML = `<label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">${displayLabel}</label>`;
+
+                        if (lowerField === 'sub section / section' || lowerField === 'sub section' || lowerField === 'subsection') {
+                            let lockedInput = document.createElement('input');
+                            lockedInput.type = 'text';
+                            lockedInput.id = `db-field-${field}`;
+                            lockedInput.value = (item.subsection || '').toUpperCase();
+                            lockedInput.readOnly = true;
+                            lockedInput.className = "uppercase w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed focus:outline-none";
+                            lockedInput.title = "Terkunci: Otomatis mengikuti Sub Section pada sheet user";
+                            wrapper.appendChild(lockedInput);
+                        } else if (lowerField === 'section') {
+                            let lockedInput = document.createElement('input');
+                            lockedInput.type = 'text';
+                            lockedInput.id = `db-field-${field}`;
+                            lockedInput.value = (item.section || '').toUpperCase();
+                            lockedInput.readOnly = true;
+                            lockedInput.className = "uppercase w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed focus:outline-none";
+                            lockedInput.title = "Terkunci: Otomatis mengikuti Section pada sheet user";
+                            wrapper.appendChild(lockedInput);
+                        } else if (lowerField === 'jabatan') {
+                            let lockedInput = document.createElement('input');
+                            lockedInput.type = 'text';
+                            lockedInput.id = `db-field-${field}`;
+                            lockedInput.value = (item.jobgroup || '').toUpperCase();
+                            lockedInput.readOnly = true;
+                            lockedInput.className = "uppercase w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed focus:outline-none";
+                            lockedInput.title = "Terkunci: Otomatis mengikuti Job Group pada sheet user";
+                            wrapper.appendChild(lockedInput);
+                        } else if (lowerField === 'status') {
+                            let lockedInput = document.createElement('input');
+                            lockedInput.type = 'text';
+                            lockedInput.id = `db-field-${field}`;
+                            lockedInput.value = (item.status || 'ACTIVE').toUpperCase();
+                            lockedInput.readOnly = true;
+                            lockedInput.className = "uppercase w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700/60 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 cursor-not-allowed focus:outline-none";
+                            lockedInput.title = "Terkunci: Otomatis mengikuti Status pada sheet user";
+                            wrapper.appendChild(lockedInput);
+                        } else if (lowerField.includes('bpjs')) {
+                            let bpjsInput = document.createElement('input');
+                            bpjsInput.type = 'text';
+                            bpjsInput.id = `db-field-${field}`;
+                            bpjsInput.value = String(rawVal).toUpperCase();
+                            bpjsInput.placeholder = "MASUKKAN NO BPJS...";
+                            bpjsInput.setAttribute('oninput', 'this.value = this.value.toUpperCase()');
+                            bpjsInput.className = "uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50";
+                            wrapper.appendChild(bpjsInput);
+                        } else if (lowerField.includes('email')) {
+                            let emailInput = document.createElement('input');
+                            emailInput.type = 'email';
+                            emailInput.id = `db-field-${field}`;
+                            emailInput.value = String(rawVal).toLowerCase();
+                            emailInput.placeholder = "contoh@email.com";
+                            emailInput.setAttribute('oninput', 'this.value = this.value.toLowerCase()');
+                            emailInput.className = "lowercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-medium text-cyan-600 dark:text-cyan-300 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50";
+                            wrapper.appendChild(emailInput);
+                        } else if (lowerField.includes('ktp') && lowerField.includes('passport') || lowerField.includes('passport')) {
+                            let ktpInput = document.createElement('input');
+                            ktpInput.type = 'text';
+                            ktpInput.id = `db-field-${field}`;
+                            ktpInput.value = String(rawVal).toUpperCase();
+                            ktpInput.placeholder = "MASUKKAN E-KTP (NIK) / PASSPORT NO...";
+                            ktpInput.setAttribute('oninput', 'this.value = this.value.toUpperCase()');
+                            ktpInput.className = "uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50";
+                            wrapper.appendChild(ktpInput);
+                        } else if (isDate) {
+                            let dateInput = document.createElement('input');
+                            dateInput.type = 'date';
+                            dateInput.id = `db-field-${field}`;
+                            dateInput.value = formatDateForInput(rawVal);
+                            dateInput.className = "w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-cyan-600 dark:text-cyan-300 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50";
+                            wrapper.appendChild(dateInput);
+                        } else if (lowerField.includes('diagnosa') || lowerField.includes('detail alamat') || lowerField.includes('alamat')) {
+                            let textAreaInput = document.createElement('textarea');
+                            textAreaInput.id = `db-field-${field}`;
+                            textAreaInput.rows = 2;
+                            textAreaInput.value = String(rawVal).toUpperCase();
+                            textAreaInput.placeholder = `MASUKKAN ${displayLabel.toUpperCase()}...`;
+                            textAreaInput.setAttribute('oninput', 'this.value = this.value.toUpperCase()');
+                            textAreaInput.className = "uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 resize-y";
+                            wrapper.appendChild(textAreaInput);
+                        } else if (lowerField.includes('telepon') || lowerField.includes('phone') || lowerField.includes('hp') || lowerField.includes('whatsapp') || lowerField.includes('darurat')) {
+                            let phoneInput = document.createElement('input');
+                            phoneInput.type = 'tel';
+                            phoneInput.id = `db-field-${field}`;
+                            phoneInput.value = String(rawVal).toUpperCase();
+                            phoneInput.placeholder = "CONTOH: 08123456789";
+                            phoneInput.setAttribute('oninput', 'this.value = this.value.toUpperCase()');
+                            phoneInput.className = "uppercase w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50";
+                            wrapper.appendChild(phoneInput);
+                        } else {
+                            const uniqueFieldValues = [...new Set(manpowerData.map(d => d.dbRecord && d.dbRecord[field]).filter(Boolean))].map(v => String(v).toUpperCase()).sort();
+                            let multiSelectEl = createSearchableMultiSelect(`db-field-${field}`, String(rawVal).toUpperCase(), uniqueFieldValues);
+                            wrapper.appendChild(multiSelectEl);
+                        }
+
+                        if (subContainer) subContainer.appendChild(wrapper);
+                    });
+                }
+
+                renderFieldGroup('Data Alamat & Domisili', 'fa-solid fa-map-location-dot text-violet-500 dark:text-violet-400', 'border-violet-500/20', 'bg-gradient-to-b from-violet-400 to-purple-500', 'SECTION ID: 03', addressFields);
+                renderFieldGroup('Data Personal & Kontak', 'fa-solid fa-address-card text-sky-500 dark:text-sky-400', 'border-sky-500/20', 'bg-gradient-to-b from-sky-400 to-blue-500', 'SECTION ID: 04', personalFields);
+                renderFieldGroup('Atribut Tambahan Lainnya', 'fa-solid fa-database text-emerald-500 dark:text-emerald-400', 'border-emerald-500/20', 'bg-gradient-to-b from-emerald-400 to-teal-500', 'SECTION ID: 05', otherFields);
+
+                const viewModal = document.getElementById('view-modal');
+                if (viewModal) {
+                    viewModal.classList.remove('hidden');
+                }
+            } catch (err) {
+                console.error('Error opening details modal:', err);
+                showToast('Gagal membuka detail: ' + err.message, 'error');
+            }
+        }
+
+        function closeViewModal() { 
+            const viewModal = document.getElementById('view-modal');
+            if (viewModal) viewModal.classList.add('hidden'); 
+        }
+
+        function triggerSaveManpower() {
+            document.getElementById('edit-manpower-form').requestSubmit();
+        }
+
+        function saveManpowerDetail(event) {
+            event.preventDefault();
+            const updated = {
+                rowIdx: document.getElementById('edit-row-idx').value,
+                nrp: document.getElementById('edit-nrp').value.trim().toUpperCase(),
+                nama: document.getElementById('edit-nama').value.trim().toUpperCase(),
+                position: document.getElementById('edit-position').value.trim().toUpperCase(),
+                jobgroup: document.getElementById('edit-jobgroup').value.trim().toUpperCase(),
+                jobrank: document.getElementById('edit-jobrank').value.trim().toUpperCase(),
+                section: document.getElementById('edit-section').value.trim().toUpperCase(),
+                subsection: document.getElementById('edit-subsection').value.trim().toUpperCase(),
+                custodian: document.getElementById('edit-custodian').value.trim().toUpperCase(),
+                departemen: document.getElementById('edit-departemen').value.trim().toUpperCase(),
+                status: document.getElementById('edit-status').value.trim().toUpperCase(),
+                perusahaan: document.getElementById('edit-perusahaan').value.trim().toUpperCase()
+            };
+
+            let dbUpdates = {};
+
+            dbFieldsList.forEach(field => {
+                const lowerF = field.toLowerCase();
+                if (lowerF === 'nrp' || lowerF === 'nama' || lowerF === 'superior' || lowerF === 'perusahaan') return;
+                const el = document.getElementById(`db-field-${field}`);
+                if (el) {
+                    if (lowerF.includes('email')) {
+                        dbUpdates[field] = el.value.trim().toLowerCase();
+                    } else {
+                        dbUpdates[field] = el.value.trim().toUpperCase();
+                    }
+                }
+            });
+
+            const loader = document.getElementById('global-loader');
+            loader.classList.remove('opacity-0', 'hidden');
+            document.getElementById('loader-text').innerText = "Menyimpan pembaruan data...";
+            closeViewModal();
+
+            if (typeof google !== 'undefined' && google.script && google.script.run) {
+                google.script.run
+                    .withSuccessHandler(function(res) {
+                        loader.classList.add('hidden');
+                        if (res.success) {
+                            loadSpreadsheetData(false);
+                            showToast('Data & relasi Manpower berhasil diperbarui!', 'success');
+                        } else {
+                            showToast('Gagal: ' + res.error, 'error');
+                        }
+                    })
+                    .withFailureHandler(function(err) {
+                        loader.classList.add('hidden');
+                        showToast('Error: ' + err.message, 'error');
+                    })
+                    .updateSingleManpower({ item: updated, dbUpdates: dbUpdates });
+            } else {
+                setTimeout(() => {
+                    loader.classList.add('hidden');
+                    showToast('Berhasil (Mock Mode)', 'success');
+                }, 400);
+            }
+        }
+
+        function openSingleRoleModal(nrp) {
+            activeTargetNrpForModal = nrp;
+            selectedSettingsNrps.clear();
+            selectedSettingsNrps.add(nrp);
+            openRoleModal();
+        }
+
+        function openBatchRoleModal() {
+            if (selectedSettingsNrps.size === 0) return;
+            activeTargetNrpForModal = null;
+            openRoleModal();
+        }
+
+        function openRoleModal() {
+            document.getElementById('role-modal-desc').innerText = activeTargetNrpForModal ? `Ubah role untuk NRP: ${activeTargetNrpForModal}` : `Ubah role untuk ${selectedSettingsNrps.size} akun terpilih.`;
+            document.getElementById('role-modal').classList.remove('hidden');
+        }
+
+        function closeRoleModal() { document.getElementById('role-modal').classList.add('hidden'); activeTargetNrpForModal = null; }
+
+        function executeBatchRoleUpdate() {
+            const newRole = document.getElementById('target-role-select').value;
+            const nrpList = Array.from(selectedSettingsNrps);
+            const loader = document.getElementById('global-loader');
+            loader.classList.remove('opacity-0', 'hidden');
+            document.getElementById('loader-text').innerText = "Memperbarui role massal...";
+            closeRoleModal();
+
+            if (typeof google !== 'undefined' && google.script && google.script.run) {
+                google.script.run
+                    .withSuccessHandler(function(res) {
+                        loader.classList.add('hidden');
+                        if (res.success) {
+                            loadSpreadsheetData(false);
+                            showToast(`Berhasil memperbarui ${res.count} role!`, 'success');
+                        } else {
+                            showToast('Gagal: ' + res.error, 'error');
+                        }
+                    })
+                    .withFailureHandler(function(err) {
+                        loader.classList.add('hidden');
+                        showToast('Error: ' + err.message, 'error');
+                    })
+                    .updateRolesBatch(nrpList, newRole);
+            } else {
+                setTimeout(() => {
+                    loader.classList.add('hidden');
+                    showToast('Berhasil (Mock Mode)', 'success');
+                }, 400);
+            }
+        }
+    </script>
+</body>
+</html>
