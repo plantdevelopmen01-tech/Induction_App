@@ -1,935 +1,385 @@
 const SPREADSHEET_ID = "1NTyd6qsyj95Q5og8ErAOWqZM_HroyzYxYBuJ1069jyc";
 const SHEET_NAME = "user"; 
-const DB_MP_SHEET_NAME = "Manpower";
-const SESSION_TTL_SECONDS = 21600;
-const ALLOWED_ROLES = ['user', 'admin', 'administrator'];
-
-function getSessionSecret() {
-  const properties = PropertiesService.getScriptProperties();
-  let secret = properties.getProperty('SESSION_SECRET');
-  if (!secret) {
-    secret = Utilities.getUuid() + Utilities.getUuid();
-    properties.setProperty('SESSION_SECRET', secret);
-  }
-  return secret;
-}
-
-function createSessionToken(user) {
-  const payload = {
-    nrp: user.nrp,
-    role: user.role,
-    nama: user.nama,
-    expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000
-  };
-  const encodedPayload = Utilities.base64EncodeWebSafe(JSON.stringify(payload));
-  const signature = Utilities.base64EncodeWebSafe(
-    Utilities.computeHmacSha256Signature(encodedPayload, getSessionSecret())
-  );
-  return encodedPayload + '.' + signature;
-}
-
-function normalizeRole(value) {
-  const role = String(value || 'user').trim().toLowerCase();
-  return ALLOWED_ROLES.includes(role) ? role : 'user';
-}
-
-function normalizeStatus(value) {
-  return String(value || '').replace(/[\u00a0\s_-]+/g, '').toLowerCase();
-}
-
-function hashPassword(password) {
-  const digest = Utilities.computeDigest(
-    Utilities.DigestAlgorithm.SHA_256,
-    String(password || ''),
-    Utilities.Charset.UTF_8
-  );
-  return 'sha256:' + digest.map(byte => {
-    const value = byte < 0 ? byte + 256 : byte;
-    return ('0' + value.toString(16)).slice(-2);
-  }).join('');
-}
-
-function passwordMatches(suppliedPassword, storedPassword) {
-  const supplied = String(suppliedPassword || '').trim();
-  const stored = String(storedPassword || '').trim();
-  if (!stored) return false;
-  if (stored.toLowerCase().startsWith('sha256:')) {
-    return hashPassword(supplied) === stored.toLowerCase();
-  }
-  return supplied.toUpperCase() === stored.toUpperCase();
-}
-
-function getUserSheetContext() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-  const values = sheet.getDataRange().getDisplayValues();
-  if (!values.length) return { sheet: sheet, rows: [], headers: [] };
-  return {
-    sheet: sheet,
-    rows: values,
-    headers: values[0].map(header => String(header).toLowerCase().trim())
-  };
-}
-
-function findHeaderIndex(headers, aliases) {
-  return headers.findIndex(header => aliases.includes(header));
-}
-
-function findHeaderIndexFlexible(headers, aliases) {
-  const exactIndex = findHeaderIndex(headers, aliases);
-  if (exactIndex !== -1) return exactIndex;
-  return headers.findIndex(header => aliases.some(alias => header.includes(alias)));
-}
-
-function findRoleHeaderIndex(headers) {
-  const exactIndex = findHeaderIndex(headers, ['role', 'user role', 'userrole', 'hak akses', 'level role', 'access role']);
-  if (exactIndex !== -1) return exactIndex;
-  return headers.findIndex(header => header.includes('role') || header.includes('hak akses')); 
-}
-
-function findUserStatusHeaderIndex(headers) {
-  const exactIndex = findHeaderIndex(headers, ['status']);
-  if (exactIndex !== -1) return exactIndex;
-  return headers.findIndex(header => header.includes('status') && !header.includes('karyawan'));
-}
-
-function findUserNrpHeaderIndex(headers) {
-  const exactIndex = findHeaderIndex(headers, ['nrp', 'nik', 'id', 'user id']);
-  if (exactIndex !== -1) return exactIndex;
-  return headers.findIndex(header => header.includes('nrp') || header.includes('nik') || header.includes('user id'));
-}
-
-function findPasswordHeaderIndex(headers) {
-  const exactIndex = findHeaderIndex(headers, ['password', 'pass', 'kata sandi']);
-  if (exactIndex !== -1) return exactIndex;
-  return headers.findIndex(header => header.includes('password') || header.includes('kata sandi'));
-}
-
-function findUserByNrp(nrp) {
-  const context = getUserSheetContext();
-  const nrpIndex = findUserNrpHeaderIndex(context.headers);
-  if (nrpIndex === -1) return null;
-
-  const roleIndex = findRoleHeaderIndex(context.headers);
-  const statusIndex = findUserStatusHeaderIndex(context.headers);
-  const passwordIndex = findPasswordHeaderIndex(context.headers);
-  const normalized = normalizeNrp(nrp);
-  for (let rowIndex = 1; rowIndex < context.rows.length; rowIndex++) {
-    const row = context.rows[rowIndex];
-    if (normalizeNrp(row[nrpIndex]) !== normalized) continue;
-    return {
-      nrp: String(row[nrpIndex] || '').trim(),
-      nama: String(row[findHeaderIndexFlexible(context.headers, ['nama', 'name', 'karyawan', 'employee'])] || '').trim(),
-      role: normalizeRole(roleIndex === -1 ? 'user' : row[roleIndex]),
-      status: statusIndex === -1 ? 'active' : normalizeStatus(row[statusIndex]),
-      password: passwordIndex === -1 ? '' : String(row[passwordIndex] || '').trim(),
-      rowIndex: rowIndex + 1
-    };
-  }
-  return null;
-}
-
-function authenticateUser(nrp, password) {
-  const user = findUserByNrp(nrp);
-  if (!user) {
-    throw new Error('NRP tidak ditemukan pada sheet user.');
-  }
-  if (!['active', 'aktif'].includes(user.status)) {
-    throw new Error('Akun tidak aktif. Status user harus Active.');
-  }
-  if (!String(password || '').trim()) {
-    throw new Error('Password wajib diisi.');
-  }
-
-  // Isi kolom Password untuk mengganti password default NRP.
-  const suppliedPassword = String(password || '').trim();
-  const matchesExplicitPassword = passwordMatches(suppliedPassword, user.password);
-  const matchesDefaultNrp = !user.password && normalizeNrp(suppliedPassword) === normalizeNrp(user.nrp);
-  if (!matchesExplicitPassword && !matchesDefaultNrp) {
-    throw new Error('Password salah. Password default adalah NRP.');
-  }
-
-  const token = createSessionToken(user);
-  return { success: true, sessionToken: token, token: token, nrp: user.nrp, nama: user.nama, role: user.role };
-}
-
-function changePassword(payload) {
-  try {
-    const session = requireSession(payload && payload.sessionToken, ['user', 'admin', 'administrator']);
-    const currentPassword = String(payload.currentPassword || '').trim();
-    const newPassword = String(payload.newPassword || '').trim();
-    if (!currentPassword || newPassword.length < 6) {
-      return { success: false, error: 'Password lama wajib diisi dan password baru minimal 6 karakter.' };
-    }
-
-    const user = findUserByNrp(session.nrp);
-    const validCurrentPassword = user.password
-      ? passwordMatches(currentPassword, user.password)
-      : normalizeNrp(currentPassword) === normalizeNrp(user.nrp);
-    if (!validCurrentPassword) return { success: false, error: 'Password lama tidak valid.' };
-
-    const context = getUserSheetContext();
-    let passwordIndex = findHeaderIndex(context.headers, ['password', 'pass', 'kata sandi']);
-    if (passwordIndex === -1) {
-      passwordIndex = context.headers.length;
-      context.sheet.getRange(1, passwordIndex + 1).setValue('Password');
-    }
-    context.sheet.getRange(user.rowIndex, passwordIndex + 1).setValue(hashPassword(newPassword));
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.toString() };
-  }
-}
-
-function resetPasswordsBatch(payload) {
-  try {
-    requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
-    const nrpList = Array.isArray(payload.nrpList) ? payload.nrpList : [];
-    if (!nrpList.length) return { success: false, error: 'Tidak ada akun yang dipilih.' };
-
-    const context = getUserSheetContext();
-    const nrpIndex = findUserNrpHeaderIndex(context.headers);
-    if (nrpIndex === -1) return { success: false, error: 'Header NRP tidak ditemukan pada sheet user.' };
-
-    let passwordIndex = findPasswordHeaderIndex(context.headers);
-    if (passwordIndex === -1) {
-      passwordIndex = context.headers.length;
-      context.sheet.getRange(1, passwordIndex + 1).setValue('Password');
-    }
-
-    const selectedNrps = new Set(nrpList.map(normalizeNrp).filter(Boolean));
-    let count = 0;
-    for (let rowIndex = 1; rowIndex < context.rows.length; rowIndex++) {
-      const sheetNrp = String(context.rows[rowIndex][nrpIndex] || '').trim();
-      if (!selectedNrps.has(normalizeNrp(sheetNrp))) continue;
-      context.sheet.getRange(rowIndex + 1, passwordIndex + 1)
-        .setNumberFormat('@')
-        .setValue(hashPassword(sheetNrp));
-      count++;
-    }
-    return { success: true, count: count };
-  } catch (err) {
-    return { success: false, error: err.toString() };
-  }
-}
-
-function migratePlaintextPasswordsToHash() {
-  const context = getUserSheetContext();
-  const passwordIndex = findPasswordHeaderIndex(context.headers);
-  if (passwordIndex === -1) {
-    return { success: false, error: 'Header Password tidak ditemukan pada sheet user.' };
-  }
-
-  let count = 0;
-  for (let rowIndex = 1; rowIndex < context.rows.length; rowIndex++) {
-    const currentPassword = String(context.rows[rowIndex][passwordIndex] || '').trim();
-    if (!currentPassword || currentPassword.toLowerCase().startsWith('sha256:')) continue;
-    context.sheet.getRange(rowIndex + 1, passwordIndex + 1)
-      .setNumberFormat('@')
-      .setValue(hashPassword(currentPassword));
-    count++;
-  }
-  return { success: true, migrated: count };
-}
-
-function requireSession(token, allowedRoles) {
-  if (!token) throw new Error('Sesi tidak ditemukan. Silakan login kembali.');
-  const parts = String(token).split('.');
-  if (parts.length !== 2) throw new Error('Sesi tidak valid. Silakan login kembali.');
-
-  const expectedSignature = Utilities.base64EncodeWebSafe(
-    Utilities.computeHmacSha256Signature(parts[0], getSessionSecret())
-  );
-  if (parts[1] !== expectedSignature) throw new Error('Sesi tidak valid. Silakan login kembali.');
-
-  let session;
-  try {
-    session = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
-  } catch (error) {
-    throw new Error('Sesi tidak valid. Silakan login kembali.');
-  }
-  if (!session.expiresAt || Date.now() > session.expiresAt) {
-    throw new Error('Sesi kedaluwarsa. Silakan login kembali.');
-  }
-
-  const currentUser = findUserByNrp(session.nrp);
-  if (!currentUser) throw new Error('Akun tidak ditemukan. Silakan login kembali.');
-  session.role = currentUser.role;
-  session.nama = currentUser.nama;
-  if (allowedRoles && !allowedRoles.includes(session.role)) {
-    throw new Error('Anda tidak memiliki izin untuk melakukan operasi ini.');
-  }
-  return session;
-}
+const DB_MP_SHEET_NAME = "Manpower"; // Diperbarui dari db_MP menjadi Manpower
 
 /**
- * Normalisasi NRP untuk menghilangkan leading zeros saat pencocokan angka/string.
- * Contoh: "0113039" -> "113039"
+ * Normalisasi NRP: menghapus leading zero dan spasi tak terlihat
+ * @param {string|number} val
+ * @return {string}
  */
 function normalizeNrp(val) {
   if (val === null || val === undefined) return '';
-  let str = String(val).trim();
-  if (str.startsWith("'")) str = str.substring(1).trim();
-  return str.replace(/^0+/, '');
+  return String(val).trim().replace(/^0+/, '');
 }
 
-/**
- * Format nilai NRP agar tersimpan sebagai Text murni dengan leading zero (misal: '01151181)
- */
-function formatTextValue(val) {
-  if (val === null || val === undefined) return '';
-  let str = String(val).trim();
-  if (!str) return '';
-  return str.startsWith("'") ? str : "'" + str;
-}
-
-// Header resmi pada sheet Manpower. Data organisasi dari sheet user hanya
-// ditulis ke kolom ini; kolom data pribadi lain tetap tidak disentuh.
-const MANPOWER_HEADER_ALIASES = {
-  NRP: ['nrp', 'nik', 'id', 'user id'],
-  NAMA: ['nama', 'name', 'karyawan', 'employee'],
-  PERUSAHAAN: ['perusahaan', 'company', 'pt'],
-  'KATEGORI AKUN': ['kategori akun', 'category kemitraan', 'category', 'kategori', 'kemitraan'],
-  'LEVEL KARYAWAN': ['level karyawan', 'job rank', 'rank', 'level'],
-  'GOLONGAN KARYAWAN': ['golongan karyawan', 'job group', 'jobgroup', 'group'],
-  'STATUS KARYAWAN': ['status karyawan', 'status'],
-  'SUB SECTION / SECTION': ['sub section / section', 'sub section', 'subsection']
-};
-
-function findHeaderByAliases(headers, aliases) {
-  return headers.findIndex(header => aliases.includes(String(header).toLowerCase().trim()));
-}
-
-function mapUserValuesToManpowerHeaders(manpowerHeaders, values) {
-  const mapped = {};
-  Object.entries(MANPOWER_HEADER_ALIASES).forEach(([field, aliases]) => {
-    const index = findHeaderByAliases(manpowerHeaders, aliases);
-    if (index !== -1 && values[field] !== undefined) {
-      mapped[manpowerHeaders[index]] = values[field];
-    }
-  });
-  return mapped;
-}
-
-function getRecordValueByAliases(record, aliases) {
-  if (!record) return '';
-  const key = Object.keys(record).find(name => aliases.includes(String(name).toLowerCase().trim()));
-  return key ? String(record[key] || '').trim() : '';
-}
-
-function findCreatedColumn(headers) {
-  return headers.findIndex(header => {
-    const normalized = String(header).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    return normalized === 'created' || normalized === 'created at' || normalized === 'created date' || normalized === 'tanggal created' || normalized === 'tanggal dibuat';
-  });
-}
-
-function writeCreatedTimestamp(sheet, row, headers) {
-  const createdColumn = findCreatedColumn(headers);
-  if (createdColumn === -1) return;
-  sheet.getRange(row, createdColumn + 1)
-    .setNumberFormat('yyyy-mm-dd hh:mm:ss')
-    .setValue(new Date());
-}
-
-function getManpowerUserValues(headers, item) {
-  return mapUserValuesToManpowerHeaders(headers, {
-    NRP: formatTextValue(item.nrp),
-    NAMA: String(item.nama || '').trim(),
-    PERUSAHAAN: String(item.perusahaan || '').trim(),
-    'KATEGORI AKUN': item.category || '',
-    'LEVEL KARYAWAN': item.jobrank || '',
-    'GOLONGAN KARYAWAN': item.jobgroup || '',
-    'STATUS KARYAWAN': item.manpowerStatus || item.status || '',
-    'SUB SECTION / SECTION': item.subsection || ''
-  });
-}
-
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Page')
+function doGet(e) {
+  return HtmlService.createTemplateFromFile('Page')
+    .evaluate()
     .setTitle('Manpower Management System')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 /**
- * Mendapatkan data manpower dengan cepat pada saat page load awal (tanpa proses tulis binding berat).
+ * Helper untuk include HTML partial jika diperlukan
+ */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+/**
+ * Membaca data gabungan dari sheet 'user' dan sheet 'Manpower' secara cepat & presisi
+ * @return {Object} { data: Array, dbFields: Array }
  */
 function getManpowerDataFast() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    let dbSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
-    
-    if (!dbSheet) {
-      dbSheet = ss.insertSheet(DB_MP_SHEET_NAME);
-      dbSheet.appendRow(["NRP", "Nama", "Perusahaan"]);
+    const userSheet = ss.getSheetByName(SHEET_NAME);
+    const mpSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
+
+    if (!userSheet) {
+      throw new Error(`Sheet utama '${SHEET_NAME}' tidak ditemukan.`);
     }
 
-    const rows = sheet.getDataRange().getDisplayValues();
-    if (!rows || rows.length <= 1) {
-      return { data: [], dbFields: ["NRP", "Nama", "Perusahaan"] };
+    // Read User Sheet
+    const userValues = userSheet.getDataRange().getValues();
+    if (userValues.length < 2) {
+      return { data: [], dbFields: [] };
     }
 
-    const headers = rows[0].map(h => String(h).toLowerCase().trim());
-    const findCol = (keywords) => headers.findIndex(h => keywords.some(kw => h.includes(kw)));
-    
-    const nrpIdx = findCol(['nrp', 'nik', 'id', 'user id']);
-    const namaIdx = findCol(['nama', 'name', 'karyawan', 'employee']);
-    const posIdx = findCol(['position', 'jabatan', 'posisi']);
-    const jgIdx = findCol(['job group', 'jobgroup', 'group']);
-    const jrIdx = findCol(['job rank', 'rank', 'level']);
-    const secIdx = headers.findIndex(h => h.includes('section') && !h.includes('sub'));
-    const deptIdx = findCol(['departemen', 'department', 'divisi']);
-    const subSecIdx = findCol(['sub section', 'subsection', 'sub']);
-    const custIdx = findCol(['custodian', 'leader', 'atasan']);
-    const statIdx = findCol(['status']);
-    const compIdx = findCol(['perusahaan', 'company', 'pt']);
-    const catIdx = findCol(['category kemitraan', 'category', 'kategori', 'kemitraan']);
-    const roleIdx = findCol(['role', 'hak akses']);
+    const userHeaders = userValues[0].map(h => String(h).trim());
+    const nrpIdx = userHeaders.findIndex(h => h.toLowerCase() === 'nrp');
+    const namaIdx = userHeaders.findIndex(h => h.toLowerCase() === 'nama');
+    const posIdx = userHeaders.findIndex(h => h.toLowerCase() === 'position' || h.toLowerCase() === 'jabatan');
+    const jgIdx = userHeaders.findIndex(h => h.toLowerCase() === 'job group' || h.toLowerCase() === 'jobgroup');
+    const jrIdx = userHeaders.findIndex(h => h.toLowerCase() === 'job rank' || h.toLowerCase() === 'jobrank');
+    const secIdx = userHeaders.findIndex(h => h.toLowerCase() === 'section');
+    const subSecIdx = userHeaders.findIndex(h => h.toLowerCase() === 'sub section' || h.toLowerCase() === 'subsection');
+    const custIdx = userHeaders.findIndex(h => h.toLowerCase() === 'custodian' || h.toLowerCase() === 'leader');
+    const deptIdx = userHeaders.findIndex(h => h.toLowerCase() === 'departemen' || h.toLowerCase() === 'department');
+    const statIdx = userHeaders.findIndex(h => h.toLowerCase() === 'status');
+    const compIdx = userHeaders.findIndex(h => h.toLowerCase() === 'perusahaan' || h.toLowerCase() === 'company');
+    const catIdx = userHeaders.findIndex(h => h.toLowerCase() === 'category' || h.toLowerCase() === 'kategori');
+    const roleIdx = userHeaders.findIndex(h => h.toLowerCase() === 'role');
 
-    const actualNrpIdx = nrpIdx !== -1 ? nrpIdx : 0;
-    const actualNamaIdx = namaIdx !== -1 ? namaIdx : 1;
+    // Read Manpower Sheet (Relasi Sekunder)
+    let mpMap = new Map();
+    let dbFields = [];
 
-    let dbMap = new Map();
-    let dbFieldNames = ["NRP", "Nama", "Perusahaan"];
-    const dbRows = dbSheet.getDataRange().getDisplayValues();
-    
-    if (dbRows && dbRows.length > 0) {
-      const rawDbHeaders = dbRows[0].map(h => String(h).trim()).filter(Boolean);
-      
-      dbFieldNames = rawDbHeaders.filter(h => {
-        const lower = h.toLowerCase();
-        return lower !== 'superior';
-      });
-      
-      const dbNrpIdx = rawDbHeaders.findIndex(h => h.toLowerCase() === 'nrp' || h.toLowerCase() === 'nik' || h.toLowerCase() === 'id');
+    if (mpSheet) {
+      const mpValues = mpSheet.getDataRange().getValues();
+      if (mpValues.length > 0) {
+        dbFields = mpValues[0].map(f => String(f).trim());
+        const mpNrpIdx = dbFields.findIndex(f => f.toLowerCase() === 'nrp');
 
-      if (dbNrpIdx !== -1) {
-        for (let j = 1; j < dbRows.length; j++) {
-          let rNrp = String(dbRows[j][dbNrpIdx] || '').trim();
-          if (rNrp) {
-            let recordObj = {};
-            rawDbHeaders.forEach((fieldName, colIdx) => {
-              const lowerF = fieldName.toLowerCase();
-              if (lowerF !== 'superior') {
-                recordObj[fieldName] = dbRows[j][colIdx] !== undefined ? String(dbRows[j][colIdx]).trim() : '';
-              }
+        for (let i = 1; i < mpValues.length; i++) {
+          const row = mpValues[i];
+          const rawNrp = mpNrpIdx !== -1 ? row[mpNrpIdx] : '';
+          const normKey = normalizeNrp(rawNrp);
+          
+          if (normKey) {
+            let record = {};
+            dbFields.forEach((field, fIdx) => {
+              record[field] = row[fIdx] !== undefined ? row[fIdx] : '';
             });
-            dbMap.set(rNrp, recordObj);
-            dbMap.set(normalizeNrp(rNrp), recordObj);
+            mpMap.set(normKey, { rowIndex: i + 1, record: record });
           }
         }
       }
     }
 
-    if (dbFieldNames.length === 0) dbFieldNames = ["NRP", "Nama", "Perusahaan"];
+    // Assemble merged data array
+    const manpowerData = [];
+    for (let i = 1; i < userValues.length; i++) {
+      const row = userValues[i];
+      const rawNrp = nrpIdx !== -1 ? row[nrpIdx] : '';
+      const normNrp = normalizeNrp(rawNrp);
 
-    let data = [];
-    for (let i = 1; i < rows.length; i++) {
-      let r = rows[i];
-      let currentNrp = String(r[actualNrpIdx] !== undefined ? r[actualNrpIdx] : '').trim();
-      let currentNama = String(r[actualNamaIdx] !== undefined ? r[actualNamaIdx] : '').trim();
+      if (!normNrp && !row[namaIdx]) continue; // Skip empty rows
 
-      if (!currentNrp && !currentNama) continue;
+      const userStatus = statIdx !== -1 ? String(row[statIdx]).trim() : 'ACTIVE';
+      const userSec = secIdx !== -1 ? String(row[secIdx]).trim() : '';
+      const userSubSec = subSecIdx !== -1 ? String(row[subSecIdx]).trim() : '';
+      const userJg = jgIdx !== -1 ? String(row[jgIdx]).trim() : '';
 
-      let assignedRole = normalizeRole(roleIdx !== -1 ? r[roleIdx] : 'user');
+      // Fetch matching record from Manpower sheet map
+      const mpData = mpMap.get(normNrp) || { rowIndex: null, record: {} };
+      let dbRecord = { ...mpData.record };
 
-      let dbRecord = dbMap.get(currentNrp) || dbMap.get(normalizeNrp(currentNrp)) || {};
+      // BINDING OTOMATIS STATUS & RELASI KE SHEET MANPOWER
+      dbRecord['Status'] = userStatus.toUpperCase();
+      dbRecord['Section'] = userSec.toUpperCase();
+      dbRecord['Sub Section / Section'] = userSubSec.toUpperCase();
+      dbRecord['JABATAN'] = userJg.toUpperCase();
 
-      let sheetPerusahaan = String(compIdx !== -1 ? r[compIdx] : '').trim();
-      if (sheetPerusahaan) {
-        dbRecord['Perusahaan'] = sheetPerusahaan;
-      } else if (dbRecord['Perusahaan']) {
-        sheetPerusahaan = dbRecord['Perusahaan'];
-      }
-
-      data.push({
+      manpowerData.push({
         rowIdx: i + 1,
-        nrp: currentNrp,
-        nama: currentNama,
-        position: String(posIdx !== -1 ? r[posIdx] : '').trim(),
-        jobgroup: String(jgIdx !== -1 ? r[jgIdx] : '').trim(),
-        jobrank: String(jrIdx !== -1 ? r[jrIdx] : '').trim(),
-        section: String(secIdx !== -1 ? r[secIdx] : '').trim(),
-        departemen: String(deptIdx !== -1 ? r[deptIdx] : '').trim(),
-        subsection: String(subSecIdx !== -1 ? r[subSecIdx] : '').trim(),
-        custodian: String(custIdx !== -1 ? r[custIdx] : '').trim(),
-        status: String(statIdx !== -1 ? r[statIdx] : 'ACTIVE').trim(),
-        manpowerStatus: getRecordValueByAliases(dbRecord, ['status karyawan']),
-        perusahaan: sheetPerusahaan,
-        category: String(catIdx !== -1 ? r[catIdx] : '').trim(),
-        role: assignedRole,
+        nrp: String(rawNrp).trim(),
+        nama: namaIdx !== -1 ? String(row[namaIdx]).trim() : '',
+        position: posIdx !== -1 ? String(row[posIdx]).trim() : '',
+        jobgroup: userJg,
+        jobrank: jrIdx !== -1 ? String(row[jrIdx]).trim() : '',
+        section: userSec,
+        subsection: userSubSec,
+        custodian: custIdx !== -1 ? String(row[custIdx]).trim() : '',
+        departemen: deptIdx !== -1 ? String(row[deptIdx]).trim() : '',
+        status: userStatus,
+        perusahaan: compIdx !== -1 ? String(row[compIdx]).trim() : '',
+        category: catIdx !== -1 ? String(row[catIdx]).trim() : '',
+        role: roleIdx !== -1 ? String(row[roleIdx]).trim().toLowerCase() : 'user',
         dbRecord: dbRecord,
-        dbFields: dbFieldNames
+        mpRowIdx: mpData.rowIndex
       });
     }
 
-    return { data: data, dbFields: dbFieldNames };
+    return {
+      data: manpowerData,
+      dbFields: dbFields
+    };
+
   } catch (err) {
-    return { data: [], dbFields: ["NRP", "Nama", "Perusahaan"], error: err.toString() };
+    Logger.log('Error in getManpowerDataFast: ' + err.toString());
+    throw new Error('Gagal mengambil data: ' + err.message);
+  }
+}
+
+function executeManualSync() {
+  return getManpowerDataFast();
+}
+
+/**
+ * Menambahkan data manpower baru ke sheet 'user' dan sheet 'Manpower'
+ */
+function createNewManpower(payload) {
+  try {
+    const item = payload.item;
+    const dbUpdates = payload.dbUpdates || {};
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const userSheet = ss.getSheetByName(SHEET_NAME);
+    const mpSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
+
+    if (!userSheet) throw new Error(`Sheet '${SHEET_NAME}' tidak ditemukan.`);
+
+    const userHeaders = userSheet.getDataRange().getValues()[0].map(h => String(h).trim().toLowerCase());
+    
+    // Construct new user row array matching headers
+    const newRow = userHeaders.map(header => {
+      if (header === 'nrp') return item.nrp;
+      if (header === 'nama') return item.nama;
+      if (header === 'position' || header === 'jabatan') return item.position;
+      if (header === 'job group' || header === 'jobgroup') return item.jobgroup;
+      if (header === 'job rank' || header === 'jobrank') return item.jobrank;
+      if (header === 'section') return item.section;
+      if (header === 'sub section' || header === 'subsection') return item.subsection;
+      if (header === 'custodian' || header === 'leader') return item.custodian;
+      if (header === 'departemen' || header === 'department') return item.departemen;
+      if (header === 'status') return item.status || 'ACTIVE';
+      if (header === 'perusahaan' || header === 'company') return item.perusahaan;
+      if (header === 'category' || header === 'kategori') return item.category;
+      if (header === 'role') return item.role || 'user';
+      return '';
+    });
+
+    userSheet.appendRow(newRow);
+
+    // Update or Insert into Manpower Sheet
+    if (mpSheet) {
+      const mpValues = mpSheet.getDataRange().getValues();
+      if (mpValues.length > 0) {
+        const mpHeaders = mpValues[0].map(h => String(h).trim());
+        const mpNrpIdx = mpHeaders.findIndex(h => h.toLowerCase() === 'nrp');
+
+        const newMpRow = mpHeaders.map(header => {
+          if (header.toLowerCase() === 'nrp') return item.nrp;
+          if (header.toLowerCase() === 'nama') return item.nama;
+          if (header.toLowerCase() === 'perusahaan') return item.perusahaan;
+          if (header.toLowerCase() === 'status') return (item.status || 'ACTIVE').toUpperCase();
+          
+          if (dbUpdates[header] !== undefined) return dbUpdates[header];
+          return '';
+        });
+
+        mpSheet.appendRow(newMpRow);
+      }
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 }
 
 /**
- * Fungsi khusus untuk melakukan sinkronisasi binding dari sheet 'user' ke 'db_MP' 
- * hanya ketika tombol Synchronize ditekan secara manual.
+ * Memperbarui data tunggal di sheet 'user' dan sheet 'Manpower'
  */
-function executeManualSync(payload) {
-  requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
-  return executeManualSyncInternal();
-}
-
-function executeManualSyncInternal() {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    let dbSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
-    
-    if (!dbSheet) {
-      dbSheet = ss.insertSheet(DB_MP_SHEET_NAME);
-      dbSheet.appendRow(["NRP", "Nama", "Perusahaan"]);
-    }
-
-    const rows = sheet.getDataRange().getDisplayValues();
-    if (!rows || rows.length <= 1) {
-      return getManpowerDataFast();
-    }
-
-    const headers = rows[0].map(h => String(h).toLowerCase().trim());
-    const findCol = (keywords) => headers.findIndex(h => keywords.some(kw => h.includes(kw)));
-    
-    const nrpIdx = findCol(['nrp', 'nik', 'id', 'user id']);
-    const namaIdx = findCol(['nama', 'name', 'karyawan', 'employee']);
-    const secIdx = headers.findIndex(h => h.includes('section') && !h.includes('sub'));
-    const subSecIdx = findCol(['sub section', 'subsection', 'sub']);
-    const posIdx = findCol(['position', 'jabatan', 'posisi']);
-    const jgIdx = findCol(['job group', 'jobgroup', 'group']);
-    const jrIdx = findCol(['job rank', 'rank', 'level']);
-    const statIdx = findCol(['status']);
-    const catIdx = findCol(['category kemitraan', 'category', 'kategori', 'kemitraan']);
-    const compIdx = findCol(['perusahaan', 'company', 'pt']);
-
-    const actualNrpIdx = nrpIdx !== -1 ? nrpIdx : 0;
-    const actualNamaIdx = namaIdx !== -1 ? namaIdx : 1;
-
-    const dbRows = dbSheet.getDataRange().getDisplayValues();
-    let rawDbHeaders = dbRows.length > 0 ? dbRows[0].map(h => String(h).trim()).filter(Boolean) : ["NRP", "Nama", "Perusahaan"];
-    
-    let dbNrpColIdx = rawDbHeaders.findIndex(h => h.toLowerCase() === 'nrp' || h.toLowerCase() === 'nik' || h.toLowerCase() === 'id');
-    if (dbNrpColIdx === -1) dbNrpColIdx = 0;
-
-    let dbRowMap = new Map();
-    for (let j = 1; j < dbRows.length; j++) {
-      let rNrp = String(dbRows[j][dbNrpColIdx] || '').trim();
-      if (rNrp) {
-        dbRowMap.set(rNrp, j + 1);
-        dbRowMap.set(normalizeNrp(rNrp), j + 1);
-      }
-    }
-
-    for (let i = 1; i < rows.length; i++) {
-      let r = rows[i];
-      let currentNrp = String(r[actualNrpIdx] !== undefined ? r[actualNrpIdx] : '').trim();
-      let currentNama = String(r[actualNamaIdx] !== undefined ? r[actualNamaIdx] : '').trim();
-      if (!currentNrp && !currentNama) continue;
-
-      let formattedNrp = formatTextValue(currentNrp);
-
-      let existingDbRow = dbRowMap.get(currentNrp) || dbRowMap.get(normalizeNrp(currentNrp));
-
-      let syncValues = mapUserValuesToManpowerHeaders(rawDbHeaders, {
-        NRP: formattedNrp,
-        NAMA: currentNama,
-        PERUSAHAAN: compIdx !== -1 ? String(r[compIdx] || '').trim() : '',
-        'SUB SECTION / SECTION': subSecIdx !== -1 ? String(r[subSecIdx] || '').trim() : '',
-        'KATEGORI AKUN': catIdx !== -1 ? String(r[catIdx] || '').trim() : '',
-        'LEVEL KARYAWAN': jrIdx !== -1 ? String(r[jrIdx] || '').trim() : '',
-        'GOLONGAN KARYAWAN': jgIdx !== -1 ? String(r[jgIdx] || '').trim() : '',
-        'STATUS KARYAWAN': statIdx !== -1 ? String(r[statIdx] || '').trim() : ''
-      });
-
-      if (existingDbRow) {
-        rawDbHeaders.forEach((colName, colIdx) => {
-          let matchKey = Object.keys(syncValues).find(k => k.toLowerCase() === colName.toLowerCase());
-          if (matchKey !== undefined) {
-            if (colIdx === dbNrpColIdx) {
-              dbSheet.getRange(existingDbRow, colIdx + 1).setNumberFormat('@').setValue(formattedNrp);
-            } else {
-              dbSheet.getRange(existingDbRow, colIdx + 1).setValue(syncValues[matchKey]);
-            }
-          }
-        });
-      } else {
-        let newDbRowArr = rawDbHeaders.map(colName => {
-          let lowerC = colName.toLowerCase();
-          if (lowerC === 'nrp' || lowerC === 'nik' || lowerC === 'id') return formattedNrp;
-          let matchKey = Object.keys(syncValues).find(k => k.toLowerCase() === lowerC);
-          return matchKey !== undefined ? syncValues[matchKey] : '';
-        });
-        dbSheet.appendRow(newDbRowArr);
-        let lastRow = dbSheet.getLastRow();
-        dbSheet.getRange(lastRow, dbNrpColIdx + 1).setNumberFormat('@').setValue(formattedNrp);
-        dbRowMap.set(currentNrp, lastRow);
-        dbRowMap.set(normalizeNrp(currentNrp), lastRow);
-      }
-    }
-
-    return getManpowerDataFast();
-  } catch (err) {
-    return { data: [], dbFields: ["NRP", "Nama", "Perusahaan"], error: err.toString() };
-  }
-}
-
-function createNewManpower(payload) {
-  try {
-    requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    const item = payload.item;
-    const dbUpdates = payload.dbUpdates || {};
-
-    if (!item || !String(item.nrp || '').trim() || !String(item.nama || '').trim()) {
-      return { success: false, error: 'NRP dan nama wajib diisi.' };
-    }
-    item.role = 'user';
-    delete dbUpdates.role;
-    delete dbUpdates.Role;
-
-    const rows = sheet.getDataRange().getDisplayValues();
-    const headers = rows[0].map(h => String(h).toLowerCase().trim());
-    
-    const findCol = (keywords) => headers.findIndex(h => keywords.some(kw => h.includes(kw)));
-    const nrpIdx = findCol(['nrp', 'nik', 'id']);
-    
-    const normItemNrp = normalizeNrp(item.nrp);
-    for (let i = 1; i < rows.length; i++) {
-      let currentSheetNrp = String(rows[i][nrpIdx !== -1 ? nrpIdx : 0] || '').trim();
-      if (normalizeNrp(currentSheetNrp) === normItemNrp) {
-        return { success: false, error: 'NRP ' + item.nrp + ' sudah terdaftar dalam sistem!' };
-      }
-    }
-
-    let newRow = new Array(headers.length).fill('');
-    const mapHeader = (keywords, val) => {
-      let idx = findCol(keywords);
-      if (idx !== -1) newRow[idx] = val;
-    };
-
-    const formattedNrp = formatTextValue(item.nrp);
-
-    mapHeader(['nrp', 'nik', 'id'], formattedNrp);
-    mapHeader(['nama', 'name', 'karyawan'], item.nama);
-    mapHeader(['position', 'jabatan'], item.position);
-    mapHeader(['job group', 'jobgroup', 'group'], item.jobgroup);
-    mapHeader(['job rank', 'rank', 'level'], item.jobrank);
-    mapHeader(['section'], item.section);
-    mapHeader(['departemen', 'department', 'divisi'], item.departemen);
-    mapHeader(['sub section', 'subsection', 'sub'], item.subsection);
-    mapHeader(['custodian', 'leader', 'atasan'], item.custodian);
-    mapHeader(['status'], item.status || 'ACTIVE');
-    mapHeader(['perusahaan', 'company', 'pt'], item.perusahaan);
-    mapHeader(['category kemitraan', 'category', 'kategori', 'kemitraan'], item.category);
-    mapHeader(['role', 'hak akses'], item.role || 'user');
-
-    sheet.appendRow(newRow);
-
-    const lastUserRow = sheet.getLastRow();
-    const actualNrpColIdx = nrpIdx !== -1 ? nrpIdx : 0;
-    sheet.getRange(lastUserRow, actualNrpColIdx + 1).setNumberFormat('@').setValue(formattedNrp);
-
-    let dbSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
-    if (!dbSheet) {
-      dbSheet = ss.insertSheet(DB_MP_SHEET_NAME);
-      dbSheet.appendRow(["NRP", "Nama", "Perusahaan"]);
-    }
-
-    let dbRows = dbSheet.getDataRange().getDisplayValues();
-    let dbHeaders = dbRows.length > 0 ? dbRows[0].map(h => String(h).trim()) : ["NRP", "Nama", "Perusahaan"];
-
-    delete dbUpdates['Superior'];
-    delete dbUpdates['superior'];
-
-    Object.keys(dbUpdates).forEach(k => {
-      const lower = k.toLowerCase().trim();
-      if (lower === 'section' || lower === 'jabatan' || lower === 'perusahaan') {
-        delete dbUpdates[k];
-      }
-    });
-
-    Object.keys(dbUpdates).forEach(field => {
-      let trimmedField = String(field || '').trim();
-      let foundCol = dbHeaders.findIndex(h => h.toLowerCase() === trimmedField.toLowerCase());
-      if (foundCol === -1 && trimmedField) {
-        dbSheet.getRange(1, dbHeaders.length + 1).setValue(trimmedField);
-        dbHeaders.push(trimmedField);
-      }
-    });
-
-    let finalRecordValues = { ...dbUpdates, ...getManpowerUserValues(dbHeaders, item) };
-    let dbNrpColIdx = dbHeaders.findIndex(h => ['nrp', 'nik', 'id', 'user id'].includes(h.toLowerCase().trim()));
-    if (dbNrpColIdx === -1) dbNrpColIdx = 0;
-
-    let newDbRowArr = dbHeaders.map((colName, colIdx) => {
-      if (colIdx === dbNrpColIdx) return formattedNrp;
-      let trimmedCol = colName.trim();
-      let matchKey = Object.keys(finalRecordValues).find(k => k.toLowerCase().trim() === trimmedCol.toLowerCase());
-      return matchKey !== undefined ? finalRecordValues[matchKey] : '';
-    });
-    dbSheet.appendRow(newDbRowArr);
-
-    const lastDbRow = dbSheet.getLastRow();
-    dbSheet.getRange(lastDbRow, dbNrpColIdx + 1).setNumberFormat('@').setValue(formattedNrp);
-    writeCreatedTimestamp(dbSheet, lastDbRow, dbHeaders);
-
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.toString() };
-  }
-}
-
 function updateSingleManpower(payload) {
   try {
-    const session = requireSession(payload && payload.sessionToken, ['user', 'admin', 'administrator']);
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const item = payload.item;
-    let dbUpdates = payload.dbUpdates || {};
+    const dbUpdates = payload.dbUpdates || {};
+    const normTargetNrp = normalizeNrp(item.nrp);
 
-    if (!item || !String(item.nrp || '').trim() || !String(item.nama || '').trim()) {
-      return { success: false, error: 'NRP dan nama wajib diisi.' };
-    }
-    if (session.role === 'user' && normalizeNrp(session.nrp) !== normalizeNrp(item.nrp)) {
-      throw new Error('User hanya dapat mengubah data dirinya sendiri.');
-    }
-    delete item.role;
-    delete dbUpdates.role;
-    delete dbUpdates.Role;
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const userSheet = ss.getSheetByName(SHEET_NAME);
+    const mpSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
 
-    delete dbUpdates['Superior'];
-    delete dbUpdates['superior'];
+    if (!userSheet) throw new Error(`Sheet '${SHEET_NAME}' tidak ditemukan.`);
 
-    Object.keys(dbUpdates).forEach(k => {
-      const lower = k.toLowerCase().trim();
-      if (lower === 'sub section / section' || lower === 'sub section' || lower === 'subsection') dbUpdates[k] = item.subsection;
-      else if (lower === 'section' || lower === 'jabatan') delete dbUpdates[k];
-    });
+    // 1. Update User Sheet
+    const userValues = userSheet.getDataRange().getValues();
+    const userHeaders = userValues[0].map(h => String(h).trim().toLowerCase());
+    const nrpIdx = userHeaders.findIndex(h => h === 'nrp');
 
-    let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    const rows = sheet.getDataRange().getDisplayValues();
-    const headers = rows[0].map(h => String(h).toLowerCase().trim());
-    
-    const findCol = (keywords) => headers.findIndex(h => keywords.some(kw => h.includes(kw)));
-    const nrpIdx = findCol(['nrp', 'nik', 'id']);
-    const namaIdx = findCol(['nama', 'name', 'karyawan']);
-    const posIdx = findCol(['position', 'jabatan']);
-    const jgIdx = findCol(['job group', 'jobgroup', 'group']);
-    const jrIdx = findCol(['job rank', 'rank', 'level']);
-    const secIdx = headers.findIndex(h => h.includes('section') && !h.includes('sub'));
-    const deptIdx = findCol(['departemen', 'department', 'divisi']);
-    const subSecIdx = findCol(['sub section', 'subsection', 'sub']);
-    const custIdx = findCol(['custodian', 'leader', 'atasan']);
-    const statIdx = findCol(['status']);
-    const compIdx = findCol(['perusahaan', 'company', 'pt']);
-    const catIdx = findCol(['category kemitraan', 'category', 'kategori', 'kemitraan']);
-    const roleIdx = findCol(['role', 'hak akses']);
-
-    let targetRow = parseInt(item.rowIdx);
-    let originalNrp = '';
-    if (targetRow >= 2 && targetRow <= rows.length && nrpIdx !== -1) {
-      originalNrp = String(rows[targetRow - 1][nrpIdx] || '').trim();
-    }
-    const normItemNrp = normalizeNrp(item.nrp);
-    const normOriginalNrp = normalizeNrp(originalNrp);
-
-    if (!targetRow || targetRow < 2) {
-      for (let i = 1; i < rows.length; i++) {
-        let currentSheetNrp = String(rows[i][nrpIdx !== -1 ? nrpIdx : 0] || '').trim();
-        let normCur = normalizeNrp(currentSheetNrp);
-        if ((normItemNrp && normCur === normItemNrp) || (normOriginalNrp && normCur === normOriginalNrp)) {
-          targetRow = i + 1;
-          break;
-        }
-      }
-    }
-
-    const formattedNrp = formatTextValue(item.nrp);
-
-    if (targetRow >= 2 && targetRow <= rows.length) {
-      if (nrpIdx !== -1) {
-        sheet.getRange(targetRow, nrpIdx + 1).setNumberFormat('@').setValue(formattedNrp);
-      }
-      if (namaIdx !== -1) sheet.getRange(targetRow, namaIdx + 1).setValue(item.nama);
-      if (posIdx !== -1) sheet.getRange(targetRow, posIdx + 1).setValue(item.position);
-      if (jgIdx !== -1) sheet.getRange(targetRow, jgIdx + 1).setValue(item.jobgroup);
-      if (jrIdx !== -1) sheet.getRange(targetRow, jrIdx + 1).setValue(item.jobrank);
-      if (secIdx !== -1) sheet.getRange(targetRow, secIdx + 1).setValue(item.section);
-      if (deptIdx !== -1) sheet.getRange(targetRow, deptIdx + 1).setValue(item.departemen);
-      if (subSecIdx !== -1) sheet.getRange(targetRow, subSecIdx + 1).setValue(item.subsection);
-      if (custIdx !== -1) sheet.getRange(targetRow, custIdx + 1).setValue(item.custodian);
-      if (statIdx !== -1) sheet.getRange(targetRow, statIdx + 1).setValue(item.status);
-      if (compIdx !== -1) sheet.getRange(targetRow, compIdx + 1).setValue(item.perusahaan);
-      if (catIdx !== -1) sheet.getRange(targetRow, catIdx + 1).setValue(item.category);
-    }
-
-    let dbSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
-    if (!dbSheet) {
-      dbSheet = ss.insertSheet(DB_MP_SHEET_NAME);
-      dbSheet.appendRow(["NRP", "Nama", "Perusahaan"]);
-    }
-
-    // Gunakan getValues() agar NRP dengan leading zero tetap terbaca utuh
-    let dbAllValues = dbSheet.getDataRange().getValues();
-    let dbDisplayValues = dbSheet.getDataRange().getDisplayValues();
-    let dbHeaders = dbAllValues.length > 0 ? dbAllValues[0].map(h => String(h).trim()) : ["NRP", "Nama", "Perusahaan"];
-    
-    Object.keys(dbUpdates).forEach(field => {
-      let trimmedField = String(field || '').trim();
-      let foundCol = dbHeaders.findIndex(h => h.toLowerCase().trim() === trimmedField.toLowerCase());
-      if (foundCol === -1 && trimmedField) {
-        dbSheet.getRange(1, dbHeaders.length + 1).setValue(trimmedField);
-        dbHeaders.push(trimmedField);
-      }
-    });
-
-    // Refresh setelah kemungkinan penambahan kolom baru
-    dbAllValues = dbSheet.getDataRange().getValues();
-    dbDisplayValues = dbSheet.getDataRange().getDisplayValues();
-    dbHeaders = dbAllValues[0].map(h => String(h).trim());
-    
-    let dbNrpColIdx = dbHeaders.findIndex(h => {
-      const lower = h.toLowerCase().trim();
-      return lower === 'nrp' || lower === 'nik' || lower === 'id' || lower === 'user id';
-    });
-    if (dbNrpColIdx === -1) dbNrpColIdx = 0;
-
-    let targetDbRow = -1;
-    for (let j = 1; j < dbAllValues.length; j++) {
-      // Coba raw value (getValues) dulu, lalu display value sebagai fallback
-      let rawNrp = String(dbAllValues[j][dbNrpColIdx] || '').trim();
-      let dispNrp = String(dbDisplayValues[j][dbNrpColIdx] || '').trim();
-      let normRaw = normalizeNrp(rawNrp);
-      let normDisp = normalizeNrp(dispNrp);
-      if (
-        (normItemNrp && (normRaw === normItemNrp || normDisp === normItemNrp)) ||
-        (normOriginalNrp && (normRaw === normOriginalNrp || normDisp === normOriginalNrp))
-      ) {
-        targetDbRow = j + 1;
+    let userTargetRow = -1;
+    for (let i = 1; i < userValues.length; i++) {
+      if (normalizeNrp(userValues[i][nrpIdx]) === normTargetNrp) {
+        userTargetRow = i + 1;
         break;
       }
     }
 
-    // dbUpdates harus di-spread TERAKHIR agar nilai dari form override nilai dari sheet user
-    let finalRecordValues = { ...getManpowerUserValues(dbHeaders, item), ...dbUpdates };
+    if (userTargetRow !== -1) {
+      userHeaders.forEach((header, colIdx) => {
+        if (header === 'nama') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.nama);
+        else if (header === 'position' || header === 'jabatan') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.position);
+        else if (header === 'job group' || header === 'jobgroup') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.jobgroup);
+        else if (header === 'job rank' || header === 'jobrank') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.jobrank);
+        else if (header === 'section') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.section);
+        else if (header === 'sub section' || header === 'subsection') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.subsection);
+        else if (header === 'custodian' || header === 'leader') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.custodian);
+        else if (header === 'departemen' || header === 'department') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.departemen);
+        else if (header === 'status') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.status);
+        else if (header === 'perusahaan' || header === 'company') userSheet.getRange(userTargetRow, colIdx + 1).setValue(item.perusahaan);
+      });
+    }
 
-    if (targetDbRow !== -1) {
-      dbHeaders.forEach((colName, colIdx) => {
-        let trimmedCol = colName.trim();
-        let matchKey = Object.keys(finalRecordValues).find(k => k.toLowerCase().trim() === trimmedCol.toLowerCase());
-        if (matchKey !== undefined) {
-          if (colIdx === dbNrpColIdx) {
-            dbSheet.getRange(targetDbRow, colIdx + 1).setNumberFormat('@').setValue(formattedNrp);
-          } else {
-            dbSheet.getRange(targetDbRow, colIdx + 1).setValue(finalRecordValues[matchKey]);
+    // 2. Update Manpower Sheet
+    if (mpSheet) {
+      const mpValues = mpSheet.getDataRange().getValues();
+      if (mpValues.length > 0) {
+        const mpHeaders = mpValues[0].map(h => String(h).trim());
+        const mpNrpIdx = mpHeaders.findIndex(h => h.toLowerCase() === 'nrp');
+
+        let mpTargetRow = -1;
+        for (let i = 1; i < mpValues.length; i++) {
+          if (normalizeNrp(mpValues[i][mpNrpIdx]) === normTargetNrp) {
+            mpTargetRow = i + 1;
+            break;
           }
         }
-      });
-      writeCreatedTimestamp(dbSheet, targetDbRow, dbHeaders);
-    } else {
-      let newRowArr = dbHeaders.map((colName, colIdx) => {
-        if (colIdx === dbNrpColIdx) return formattedNrp;
-        let trimmedCol = colName.trim();
-        let matchKey = Object.keys(finalRecordValues).find(k => k.toLowerCase().trim() === trimmedCol.toLowerCase());
-        return matchKey !== undefined ? finalRecordValues[matchKey] : '';
-      });
-      dbSheet.appendRow(newRowArr);
-      const lastDbRow = dbSheet.getLastRow();
-      dbSheet.getRange(lastDbRow, dbNrpColIdx + 1).setNumberFormat('@').setValue(formattedNrp);
-      writeCreatedTimestamp(dbSheet, lastDbRow, dbHeaders);
+
+        // BINDING STATUS
+        dbUpdates['Status'] = (item.status || 'ACTIVE').toUpperCase();
+        dbUpdates['Section'] = (item.section || '').toUpperCase();
+        dbUpdates['Sub Section / Section'] = (item.subsection || '').toUpperCase();
+        dbUpdates['JABATAN'] = (item.jobgroup || '').toUpperCase();
+
+        if (mpTargetRow !== -1) {
+          mpHeaders.forEach((header, colIdx) => {
+            if (dbUpdates[header] !== undefined) {
+              mpSheet.getRange(mpTargetRow, colIdx + 1).setValue(dbUpdates[header]);
+            }
+          });
+        } else {
+          // Insert row if not exists in Manpower sheet
+          const newMpRow = mpHeaders.map(header => {
+            if (header.toLowerCase() === 'nrp') return item.nrp;
+            if (header.toLowerCase() === 'nama') return item.nama;
+            if (header.toLowerCase() === 'perusahaan') return item.perusahaan;
+            return dbUpdates[header] !== undefined ? dbUpdates[header] : '';
+          });
+          mpSheet.appendRow(newMpRow);
+        }
+      }
     }
 
     return { success: true };
   } catch (err) {
-    return { success: false, error: err.toString() };
+    return { success: false, error: err.message };
   }
 }
 
-function updateRolesBatch(payload) {
+/**
+ * Menghapus baris terpilih dari sheet 'user' dan sheet 'Manpower'
+ */
+function deleteManpowerRows(nrpList) {
   try {
-    requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
-    const nrpList = payload.nrpList || [];
-    const newRole = normalizeRole(payload.newRole);
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    const rows = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => String(h).toLowerCase().trim());
-    
-    let nrpIdx = headers.findIndex(h => h.includes('nrp') || h.includes('nik') || h.includes('id'));
-    let roleIdx = headers.findIndex(h => h.includes('role') || h.includes('hak akses'));
+    if (!nrpList || nrpList.length === 0) return { success: true, count: 0 };
+    const normSet = new Set(nrpList.map(n => normalizeNrp(n)));
 
-    if (nrpIdx === -1) nrpIdx = 0;
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const userSheet = ss.getSheetByName(SHEET_NAME);
+    const mpSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
+
+    let deletedCount = 0;
+
+    // Delete from user sheet (bottom-up)
+    if (userSheet) {
+      const userValues = userSheet.getDataRange().getValues();
+      const userHeaders = userValues[0].map(h => String(h).trim().toLowerCase());
+      const nrpIdx = userHeaders.findIndex(h => h === 'nrp');
+
+      for (let i = userValues.length - 1; i >= 1; i--) {
+        if (normSet.has(normalizeNrp(userValues[i][nrpIdx]))) {
+          userSheet.deleteRow(i + 1);
+          deletedCount++;
+        }
+      }
+    }
+
+    // Delete from Manpower sheet (bottom-up)
+    if (mpSheet) {
+      const mpValues = mpSheet.getDataRange().getValues();
+      if (mpValues.length > 0) {
+        const mpHeaders = mpValues[0].map(h => String(h).trim());
+        const mpNrpIdx = mpHeaders.findIndex(h => h.toLowerCase() === 'nrp');
+
+        for (let i = mpValues.length - 1; i >= 1; i--) {
+          if (normSet.has(normalizeNrp(mpValues[i][mpNrpIdx]))) {
+            mpSheet.deleteRow(i + 1);
+          }
+        }
+      }
+    }
+
+    return { success: true, count: deletedCount };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Memperbarui role pengguna secara masal di sheet 'user'
+ */
+function updateRolesBatch(nrpList, newRole) {
+  try {
+    if (!nrpList || nrpList.length === 0) return { success: true, count: 0 };
+    const normSet = new Set(nrpList.map(n => normalizeNrp(n)));
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const userSheet = ss.getSheetByName(SHEET_NAME);
+    if (!userSheet) throw new Error(`Sheet '${SHEET_NAME}' tidak ditemukan.`);
+
+    const userValues = userSheet.getDataRange().getValues();
+    const userHeaders = userValues[0].map(h => String(h).trim().toLowerCase());
+    const nrpIdx = userHeaders.findIndex(h => h === 'nrp');
+    let roleIdx = userHeaders.findIndex(h => h === 'role');
+
     if (roleIdx === -1) {
-      roleIdx = headers.length;
-      sheet.getRange(1, roleIdx + 1).setValue("Role");
+      userSheet.getRange(1, userHeaders.length + 1).setValue('Role');
+      roleIdx = userHeaders.length;
     }
 
-    const nrpNormSet = new Set(nrpList.map(n => normalizeNrp(n)));
-    let count = 0;
-
-    for (let i = 1; i < rows.length; i++) {
-      let sheetNrp = String(rows[i][nrpIdx] || '').trim();
-      if (nrpNormSet.has(normalizeNrp(sheetNrp))) {
-        sheet.getRange(i + 1, roleIdx + 1).setValue(newRole);
-        count++;
+    let updatedCount = 0;
+    for (let i = 1; i < userValues.length; i++) {
+      if (normSet.has(normalizeNrp(userValues[i][nrpIdx]))) {
+        userSheet.getRange(i + 1, roleIdx + 1).setValue(newRole.toLowerCase());
+        updatedCount++;
       }
     }
 
-    return { success: true, count: count };
+    return { success: true, count: updatedCount };
   } catch (err) {
-    return { success: false, error: err.toString() };
-  }
-}
-
-function deleteManpowerRows(payload) {
-  try {
-    requireSession(payload && payload.sessionToken, ['admin', 'administrator']);
-    const nrpList = payload.nrpList || [];
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let mainSheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    const rows = mainSheet.getDataRange().getValues();
-    const nrpNormSet = new Set(nrpList.map(n => normalizeNrp(n)));
-    
-    if (rows && rows.length > 1) {
-      const headers = rows[0].map(h => String(h).toLowerCase().trim());
-      let nrpIdx = headers.findIndex(h => h.includes('nrp') || h.includes('nik') || h.includes('id') || h.includes('user id'));
-      if (nrpIdx === -1) nrpIdx = 0;
-
-      for (let i = rows.length - 1; i >= 1; i--) {
-        let sheetNrp = String(rows[i][nrpIdx] || '').trim();
-        if (nrpNormSet.has(normalizeNrp(sheetNrp))) {
-          mainSheet.deleteRow(i + 1);
-        }
-      }
-    }
-
-    let dbSheet = ss.getSheetByName(DB_MP_SHEET_NAME);
-    if (dbSheet) {
-      const dbRows = dbSheet.getDataRange().getValues();
-      if (dbRows && dbRows.length > 1) {
-        const dbHeaders = dbRows[0].map(h => String(h).toLowerCase().trim());
-        let dbNrpIdx = dbHeaders.findIndex(h => h.toLowerCase() === 'nrp' || h.toLowerCase() === 'nik' || h.toLowerCase() === 'id');
-        if (dbNrpIdx === -1) dbNrpIdx = 0;
-
-        for (let j = dbRows.length - 1; j >= 1; j--) {
-          let dbNrp = String(dbRows[j][dbNrpIdx] || '').trim();
-          if (nrpNormSet.has(normalizeNrp(dbNrp))) {
-            dbSheet.deleteRow(j + 1);
-          }
-        }
-      }
-    }
-
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.toString() };
+    return { success: false, error: err.message };
   }
 }
